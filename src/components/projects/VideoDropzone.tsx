@@ -1,29 +1,19 @@
 import { useCallback, useRef, useState } from "react";
-import { FileVideo, Trash2, UploadCloud } from "lucide-react";
+import { AlertCircle, FileVideo, Trash2, UploadCloud } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatDurationLabel, formatFileSize } from "@/lib/format";
+import {
+  ACCEPTED_FORMATS_LABEL,
+  FILE_INPUT_ACCEPT,
+  videoValidationService,
+} from "@/services/videoValidationService";
+import { videoMetadataService, type VideoFileMetadata } from "@/services/videoMetadataService";
 
 export interface SelectedVideo {
   file: File;
-  durationSeconds: number | null;
-  objectUrl: string;
-}
-
-const ACCEPTED = ["video/mp4", "video/quicktime", "video/x-matroska", "video/webm", "video/mpeg"];
-const MAX_BYTES = 8 * 1024 * 1024 * 1024;
-
-/** Reads real duration metadata from the browser video decoder. */
-function readDuration(objectUrl: string): Promise<number | null> {
-  return new Promise((resolve) => {
-    const video = document.createElement("video");
-    video.preload = "metadata";
-    video.onloadedmetadata = () =>
-      resolve(Number.isFinite(video.duration) ? video.duration : null);
-    video.onerror = () => resolve(null);
-    video.src = objectUrl;
-  });
+  metadata: VideoFileMetadata;
 }
 
 export function VideoDropzone({
@@ -37,6 +27,7 @@ export function VideoDropzone({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleFiles = useCallback(
@@ -44,70 +35,111 @@ export function VideoDropzone({
       setError(null);
       const file = files?.[0];
       if (!file) return;
-      if (!file.type.startsWith("video/") || (file.type && !ACCEPTED.includes(file.type))) {
-        setError("Unsupported file type. Use MP4, MOV, MKV, WebM or MPEG.");
+
+      const structural = videoValidationService.validateFile(file);
+      if (!structural.valid) {
+        setError(structural.message ?? "Arquivo inválido.");
         return;
       }
-      if (file.size > MAX_BYTES) {
-        setError("File is larger than the 8 GB limit.");
-        return;
+
+      setReading(true);
+      try {
+        const metadata = await videoMetadataService.read(file);
+        // A container the browser cannot decode at all is rejected; a decodable
+        // file with no duration is accepted and shown as "unavailable".
+        if (!metadata.decodable && metadata.format !== "mkv") {
+          videoMetadataService.release(metadata);
+          setError(videoValidationService.messageFor("unreadable_video"));
+          return;
+        }
+        if (value) videoMetadataService.release(value.metadata);
+        onChange({ file, metadata });
+      } finally {
+        setReading(false);
       }
-      const objectUrl = URL.createObjectURL(file);
-      const durationSeconds = await readDuration(objectUrl);
-      onChange({ file, durationSeconds, objectUrl });
     },
-    [onChange],
+    [onChange, value],
+  );
+
+  const fileInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept={FILE_INPUT_ACCEPT}
+      hidden
+      onChange={(event) => {
+        void handleFiles(event.target.files);
+        event.target.value = "";
+      }}
+    />
   );
 
   if (value) {
+    const { metadata } = value;
     return (
       <div className="panel overflow-hidden">
         <div className="aspect-video w-full bg-black">
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video src={value.objectUrl} controls className="size-full" />
+          {metadata.decodable ? (
+            // eslint-disable-next-line jsx-a11y/media-has-caption
+            <video src={metadata.objectUrl} controls className="size-full" />
+          ) : (
+            <div className="grid size-full place-items-center px-6 text-center text-muted-foreground">
+              <div>
+                <FileVideo className="mx-auto size-8 opacity-50" />
+                <p className="mt-3 text-sm">
+                  Prévia indisponível neste navegador para arquivos .{metadata.format}. O upload e o
+                  processamento no servidor não são afetados.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-4 border-t border-border p-5">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/15 text-primary">
             <FileVideo className="size-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-foreground">{value.file.name}</p>
+            <p className="truncate text-sm font-medium text-foreground">{metadata.fileName}</p>
             <p className="text-timecode mt-0.5 text-xs text-muted-foreground">
-              {formatFileSize(value.file.size)} · {formatDurationLabel(value.durationSeconds)} ·{" "}
-              {value.file.type || "unknown type"}
+              {formatFileSize(metadata.sizeBytes)} ·{" "}
+              {metadata.durationSeconds != null
+                ? formatDurationLabel(metadata.durationSeconds)
+                : "duração indisponível"}{" "}
+              · {metadata.format.toUpperCase()}
+              {metadata.width && metadata.height ? ` · ${metadata.width}×${metadata.height}` : ""}
             </p>
           </div>
           <div className="flex gap-2">
             <Button
               variant="outline"
               size="sm"
-              disabled={disabled}
+              disabled={disabled || reading}
               onClick={() => inputRef.current?.click()}
             >
-              Replace
+              Substituir
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              disabled={disabled}
+              disabled={disabled || reading}
               className="text-destructive hover:text-destructive"
               onClick={() => {
-                URL.revokeObjectURL(value.objectUrl);
+                videoMetadataService.release(metadata);
                 onChange(null);
               }}
             >
               <Trash2 className="size-4" />
-              Remove
+              Remover
             </Button>
           </div>
         </div>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="video/*"
-          hidden
-          onChange={(event) => void handleFiles(event.target.files)}
-        />
+        {error && (
+          <p className="flex items-center gap-2 border-t border-border px-5 py-3 text-sm text-destructive">
+            <AlertCircle className="size-4" />
+            {error}
+          </p>
+        )}
+        {fileInput}
       </div>
     );
   }
@@ -123,6 +155,7 @@ export function VideoDropzone({
         onDrop={(event) => {
           event.preventDefault();
           setDragging(false);
+          if (disabled) return;
           void handleFiles(event.dataTransfer.files);
         }}
         className={cn(
@@ -140,22 +173,28 @@ export function VideoDropzone({
         >
           <UploadCloud className="size-7" />
         </div>
-        <h3 className="mt-5 text-lg font-semibold text-foreground">Drop your recording here</h3>
+        <h3 className="mt-5 text-lg font-semibold text-foreground">
+          {reading ? "Lendo o arquivo…" : "Arraste sua gravação aqui"}
+        </h3>
         <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-          Long-form recordings, livestreams and webinars. MP4, MOV, MKV, WebM or MPEG up to 8 GB.
+          Gravações longas, lives e webinars. Formatos suportados: {ACCEPTED_FORMATS_LABEL}. Sem
+          limite artificial de duração ou tamanho.
         </p>
-        <Button className="mt-6" disabled={disabled} onClick={() => inputRef.current?.click()}>
-          Select file
+        <Button
+          className="mt-6"
+          disabled={disabled || reading}
+          onClick={() => inputRef.current?.click()}
+        >
+          Selecionar arquivo
         </Button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="video/*"
-          hidden
-          onChange={(event) => void handleFiles(event.target.files)}
-        />
+        {fileInput}
       </div>
-      {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+      {error && (
+        <p className="mt-3 flex items-center gap-2 text-sm text-destructive">
+          <AlertCircle className="size-4" />
+          {error}
+        </p>
+      )}
     </div>
   );
 }
