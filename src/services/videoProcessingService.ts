@@ -1,4 +1,10 @@
 import { supabase } from "@/integrations/supabase/client";
+import { mapProject, projectService } from "@/services/projectService";
+import { videoMetadataService, type VideoFileMetadata } from "@/services/videoMetadataService";
+import {
+  videoUploadService,
+  type UploadProgress,
+} from "@/services/videoUploadService";
 import {
   PROCESSING_STEP_TEMPLATE,
   type EditConfiguration,
@@ -40,25 +46,6 @@ export class NotImplementedError extends Error {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = any;
-
-function mapProject(row: Row): Project {
-  return {
-    id: row.id,
-    name: row.name,
-    sourceFileName: row.source_file_name,
-    sourceFileSize: row.source_file_size == null ? null : Number(row.source_file_size),
-    sourceMimeType: row.source_mime_type,
-    sourceStoragePath: row.source_storage_path,
-    sourceUrl: row.source_url,
-    durationSeconds: row.duration_seconds == null ? null : Number(row.duration_seconds),
-    thumbnailUrl: row.thumbnail_url,
-    status: row.status as ProjectStatus,
-    processingTypes: (row.processing_types ?? []) as ProcessingType[],
-    notes: row.notes,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
 
 function mapConfiguration(row: Row): EditConfiguration {
   return {
@@ -153,9 +140,10 @@ export interface CreateProjectInput {
 export interface UploadVideoInput {
   projectId: string;
   file: File;
-  /** Duration read from the browser's video element before upload. */
-  durationSeconds: number | null;
-  onProgress?: (percent: number) => void;
+  /** Real metadata read from the file; re-read when omitted. */
+  metadata?: VideoFileMetadata;
+  onProgress?: (progress: UploadProgress) => void;
+  signal?: AbortSignal;
 }
 
 export interface SaveConfigurationInput {
@@ -189,12 +177,7 @@ export const videoProcessingService = {
   },
 
   async createProject(input: CreateProjectInput): Promise<Project> {
-    const { data, error } = await supabase
-      .from("projects")
-      .insert({ name: input.name, status: "draft" })
-      .select("*")
-      .single();
-    return mapProject(unwrap(data, error));
+    return projectService.createProject(input.name);
   },
 
   async renameProject(projectId: string, name: string): Promise<Project> {
@@ -228,63 +211,50 @@ export const videoProcessingService = {
 
   /* --------------------------------------------------------------- source */
 
-  async uploadVideo({ projectId, file, durationSeconds }: UploadVideoInput): Promise<Project> {
+  /**
+   * Real upload pipeline: metadata is persisted first, then the bytes go to
+   * object storage with real progress, then the reference is confirmed.
+   */
+  async uploadVideo({
+    projectId,
+    file,
+    metadata,
+    onProgress,
+    signal,
+  }: UploadVideoInput): Promise<Project> {
+    const resolved = metadata ?? (await videoMetadataService.read(file));
     const existing = await this.getProject(projectId);
     if (existing.sourceStoragePath) {
-      await supabase.storage.from(SOURCE_BUCKET).remove([existing.sourceStoragePath]);
+      await videoUploadService.removeStoredVideo(existing.sourceStoragePath);
     }
 
-    const path = `${projectId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
-    const { error: uploadError } = await supabase.storage
-      .from(SOURCE_BUCKET)
-      .upload(path, file, { contentType: file.type, upsert: true });
-    if (uploadError) throw new Error(uploadError.message);
-
-    const { data, error } = await supabase
-      .from("projects")
-      .update({
-        source_file_name: file.name,
-        source_file_size: file.size,
-        source_mime_type: file.type,
-        source_storage_path: path,
-        duration_seconds: durationSeconds,
-        status: "ready",
-      })
-      .eq("id", projectId)
-      .select("*")
-      .single();
-    return mapProject(unwrap(data, error));
+    await projectService.attachSourceMetadata(projectId, resolved);
+    try {
+      await projectService.setUploadStatus(projectId, "uploading");
+      const stored = await videoUploadService.uploadSourceVideo({
+        projectId,
+        file,
+        metadata: resolved,
+        onProgress,
+        signal,
+      });
+      return await projectService.confirmUpload(projectId, stored, resolved);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha no upload do vídeo.";
+      await projectService.setUploadStatus(projectId, "error", message).catch(() => null);
+      throw error;
+    }
   },
 
   async removeVideo(projectId: string): Promise<Project> {
     const existing = await this.getProject(projectId);
-    if (existing.sourceStoragePath) {
-      await supabase.storage.from(SOURCE_BUCKET).remove([existing.sourceStoragePath]);
-    }
-    const { data, error } = await supabase
-      .from("projects")
-      .update({
-        source_file_name: null,
-        source_file_size: null,
-        source_mime_type: null,
-        source_storage_path: null,
-        duration_seconds: null,
-        status: "draft",
-      })
-      .eq("id", projectId)
-      .select("*")
-      .single();
-    return mapProject(unwrap(data, error));
+    return projectService.detachSource(projectId, existing.sourceStoragePath);
   },
 
   /** Signed playback URL for the private source video, valid for one hour. */
   async getSourcePlaybackUrl(project: Project): Promise<string | null> {
     if (!project.sourceStoragePath) return null;
-    const { data, error } = await supabase.storage
-      .from(SOURCE_BUCKET)
-      .createSignedUrl(project.sourceStoragePath, 3600);
-    if (error) return null;
-    return data?.signedUrl ?? null;
+    return videoUploadService.createSignedUrl(project.sourceStoragePath);
   },
 
   /* -------------------------------------------------------- configuration */
