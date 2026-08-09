@@ -37,8 +37,8 @@ export interface UploadSourceVideoInput {
   projectId: string;
   file: File;
   metadata: VideoFileMetadata;
-  onProgress?: (progress: UploadProgress) => void;
-  signal?: AbortSignal;
+  onProgress?: ((progress: UploadProgress) => void) | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface UploadedSourceVideo {
