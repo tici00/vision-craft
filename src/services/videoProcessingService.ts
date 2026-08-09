@@ -38,7 +38,8 @@ export class NotImplementedError extends Error {
 
 /* ------------------------------------------------------------------ mappers */
 
-type Row = Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = any;
 
 function mapProject(row: Row): Project {
   return {
