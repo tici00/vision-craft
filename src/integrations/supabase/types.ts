@@ -195,12 +195,17 @@ export type Database = {
           processing_types: string[]
           source_file_name: string | null
           source_file_size: number | null
+          source_format: string | null
           source_mime_type: string | null
           source_storage_path: string | null
+          source_stored_file_name: string | null
+          source_uploaded_at: string | null
           source_url: string | null
           status: Database["public"]["Enums"]["project_status"]
           thumbnail_url: string | null
           updated_at: string
+          upload_error: string | null
+          upload_status: Database["public"]["Enums"]["upload_status"]
         }
         Insert: {
           created_at?: string
@@ -211,12 +216,17 @@ export type Database = {
           processing_types?: string[]
           source_file_name?: string | null
           source_file_size?: number | null
+          source_format?: string | null
           source_mime_type?: string | null
           source_storage_path?: string | null
+          source_stored_file_name?: string | null
+          source_uploaded_at?: string | null
           source_url?: string | null
           status?: Database["public"]["Enums"]["project_status"]
           thumbnail_url?: string | null
           updated_at?: string
+          upload_error?: string | null
+          upload_status?: Database["public"]["Enums"]["upload_status"]
         }
         Update: {
           created_at?: string
@@ -227,12 +237,17 @@ export type Database = {
           processing_types?: string[]
           source_file_name?: string | null
           source_file_size?: number | null
+          source_format?: string | null
           source_mime_type?: string | null
           source_storage_path?: string | null
+          source_stored_file_name?: string | null
+          source_uploaded_at?: string | null
           source_url?: string | null
           status?: Database["public"]["Enums"]["project_status"]
           thumbnail_url?: string | null
           updated_at?: string
+          upload_error?: string | null
+          upload_status?: Database["public"]["Enums"]["upload_status"]
         }
         Relationships: []
       }
@@ -367,6 +382,13 @@ export type Database = {
         | "completed"
         | "error"
       segment_decision: "keep" | "cut" | "undecided"
+      upload_status:
+        | "none"
+        | "preparing"
+        | "uploading"
+        | "finalizing"
+        | "uploaded"
+        | "error"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -509,6 +531,14 @@ export const Constants = {
         "error",
       ],
       segment_decision: ["keep", "cut", "undecided"],
+      upload_status: [
+        "none",
+        "preparing",
+        "uploading",
+        "finalizing",
+        "uploaded",
+        "error",
+      ],
     },
   },
 } as const

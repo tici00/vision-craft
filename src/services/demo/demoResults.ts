@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- demo placeholder rows are inserted as loose DB payloads */
 /**
  * DEMO DATA — NOT PRODUCTION LOGIC.
  *
