@@ -64,8 +64,11 @@ export function VideoDropzone({
       accept={FILE_INPUT_ACCEPT}
       hidden
       onChange={(event) => {
-        void handleFiles(event.target.files);
-        event.target.value = "";
+        const input = event.target;
+        const files = input.files;
+        void handleFiles(files).finally(() => {
+          input.value = "";
+        });
       }}
     />
   );
