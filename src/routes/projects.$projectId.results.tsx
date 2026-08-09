@@ -51,8 +51,7 @@ function ResultsPage() {
   const highlights = useQuery(projectQueries.highlights(projectId));
   const longEdit = useQuery(projectQueries.longEdit(projectId));
 
-  const invalidate = () =>
-    void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
 
   const seedDemo = useMutation({
     mutationFn: async () => {
@@ -119,7 +118,9 @@ function ResultsPage() {
 
         <Tabs defaultValue="clips">
           <TabsList>
-            <TabsTrigger value="clips">Clips {clips.data?.length ? `(${clips.data.length})` : ""}</TabsTrigger>
+            <TabsTrigger value="clips">
+              Clips {clips.data?.length ? `(${clips.data.length})` : ""}
+            </TabsTrigger>
             <TabsTrigger value="highlights">Highlights</TabsTrigger>
             <TabsTrigger value="long">Edited long video</TabsTrigger>
           </TabsList>

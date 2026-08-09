@@ -11,12 +11,7 @@ import { SegmentTimeline } from "@/components/timeline/SegmentTimeline";
 import { EmptyState } from "@/components/common/EmptyState";
 import { projectQueries } from "@/services/queries";
 import { videoProcessingService } from "@/services/videoProcessingService";
-import {
-  formatDate,
-  formatDurationLabel,
-  formatFileSize,
-  formatPercent,
-} from "@/lib/format";
+import { formatDate, formatDurationLabel, formatFileSize, formatPercent } from "@/lib/format";
 import { PROCESSING_TYPE_LABEL } from "@/types/video-editor";
 
 export const Route = createFileRoute("/projects/$projectId/")({
@@ -84,7 +79,9 @@ function ProjectDetailPage() {
           <EmptyState
             icon={<TriangleAlert className="size-5" />}
             title="Couldn't load this project"
-            description={(analysis.error as Error | null)?.message ?? "The project may have been deleted."}
+            description={
+              (analysis.error as Error | null)?.message ?? "The project may have been deleted."
+            }
             action={
               <Button asChild variant="outline">
                 <Link to="/">Back to projects</Link>
@@ -145,7 +142,6 @@ function ProjectDetailPage() {
                 {playback.isLoading ? (
                   <Skeleton className="size-full rounded-none" />
                 ) : playback.data ? (
-                  // eslint-disable-next-line jsx-a11y/media-has-caption
                   <video src={playback.data} controls className="size-full" />
                 ) : (
                   <div className="grid size-full place-items-center text-muted-foreground">
