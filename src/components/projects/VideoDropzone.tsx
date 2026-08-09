@@ -45,13 +45,9 @@ export function VideoDropzone({
       setReading(true);
       try {
         const metadata = await videoMetadataService.read(file);
-        // A container the browser cannot decode at all is rejected; a decodable
-        // file with no duration is accepted and shown as "unavailable".
-        if (!metadata.decodable && metadata.format !== "mkv") {
-          videoMetadataService.release(metadata);
-          setError(videoValidationService.messageFor("unreadable_video"));
-          return;
-        }
+        // Containers the browser cannot decode (MKV, some codecs) are still
+        // accepted: duration/preview are reported as unavailable instead of
+        // being invented, and the server pipeline reads them later.
         if (value) videoMetadataService.release(value.metadata);
         onChange({ file, metadata });
       } finally {
