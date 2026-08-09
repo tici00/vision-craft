@@ -80,7 +80,6 @@ export function VideoDropzone({
       <div className="panel overflow-hidden">
         <div className="aspect-video w-full bg-black">
           {metadata.decodable ? (
-            // eslint-disable-next-line jsx-a11y/media-has-caption
             <video src={metadata.objectUrl} controls className="size-full" />
           ) : (
             <div className="grid size-full place-items-center px-6 text-center text-muted-foreground">
