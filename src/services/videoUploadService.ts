@@ -20,8 +20,8 @@ const CHUNK_SIZE = 6 * 1024 * 1024;
 /** Below this size a single request is faster than a resumable session. */
 const RESUMABLE_THRESHOLD = 12 * 1024 * 1024;
 
-const SUPABASE_URL = import.meta.env['VITE_SUPABASE_URL'] as string;
-const SUPABASE_KEY = import.meta.env['VITE_SUPABASE_PUBLISHABLE_KEY'] as string;
+const SUPABASE_URL = import.meta.env["VITE_SUPABASE_URL"] as string;
+const SUPABASE_KEY = import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] as string;
 
 export type UploadPhase = "preparing" | "uploading" | "finalizing";
 
@@ -138,11 +138,7 @@ function uploadSingleRequest(
   const { file, metadata, onProgress, signal } = input;
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open(
-      "POST",
-      `${SUPABASE_URL}/storage/v1/object/${SOURCE_BUCKET}/${storagePath}`,
-      true,
-    );
+    request.open("POST", `${SUPABASE_URL}/storage/v1/object/${SOURCE_BUCKET}/${storagePath}`, true);
     request.setRequestHeader("authorization", `Bearer ${token}`);
     request.setRequestHeader("apikey", SUPABASE_KEY);
     request.setRequestHeader("x-upsert", "true");

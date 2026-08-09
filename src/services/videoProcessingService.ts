@@ -1,10 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { mapProject, projectService } from "@/services/projectService";
 import { videoMetadataService, type VideoFileMetadata } from "@/services/videoMetadataService";
-import {
-  videoUploadService,
-  type UploadProgress,
-} from "@/services/videoUploadService";
+import { videoUploadService, type UploadProgress } from "@/services/videoUploadService";
 import {
   PROCESSING_STEP_TEMPLATE,
   type EditConfiguration,

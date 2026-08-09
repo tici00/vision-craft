@@ -54,7 +54,8 @@ function probe(objectUrl: string): Promise<ProbeResult> {
 
     video.onloadedmetadata = () => {
       window.clearTimeout(timeout);
-      const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null;
+      const duration =
+        Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null;
       finish({
         durationSeconds: duration,
         width: video.videoWidth || null,

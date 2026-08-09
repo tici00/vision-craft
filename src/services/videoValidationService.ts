@@ -36,10 +36,7 @@ export const FILE_INPUT_ACCEPT = [
 
 export const ACCEPTED_FORMATS_LABEL = ACCEPTED_VIDEO_FORMATS.map((f) => f.label).join(", ");
 
-export type VideoValidationCode =
-  | "empty_file"
-  | "unsupported_format"
-  | "unreadable_video";
+export type VideoValidationCode = "empty_file" | "unsupported_format" | "unreadable_video";
 
 export interface VideoValidationResult {
   valid: boolean;

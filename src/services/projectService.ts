@@ -1,12 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { VideoFileMetadata } from "@/services/videoMetadataService";
 import { videoUploadService, type UploadedSourceVideo } from "@/services/videoUploadService";
-import type {
-  ProcessingType,
-  Project,
-  ProjectStatus,
-  UploadStatus,
-} from "@/types/video-editor";
+import type { ProcessingType, Project, ProjectStatus, UploadStatus } from "@/types/video-editor";
 
 /**
  * projectService — persistence for projects and their real source-video

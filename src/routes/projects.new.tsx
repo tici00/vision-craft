@@ -220,10 +220,7 @@ function NewProjectPage() {
                       : "—"
                   }
                 />
-                <Detail
-                  label="Format"
-                  value={video ? video.metadata.format.toUpperCase() : "—"}
-                />
+                <Detail label="Format" value={video ? video.metadata.format.toUpperCase() : "—"} />
                 <Detail label="MIME" value={video?.metadata.mimeType ?? "—"} />
                 <Detail
                   label="Resolution"

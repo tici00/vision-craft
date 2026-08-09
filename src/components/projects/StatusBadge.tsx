@@ -15,13 +15,7 @@ const STATUS_STYLE: Record<ProjectStatus, string> = {
 
 const ACTIVE: ProjectStatus[] = ["processing", "analyzing", "generating_clips", "rendering"];
 
-export function StatusBadge({
-  status,
-  className,
-}: {
-  status: ProjectStatus;
-  className?: string;
-}) {
+export function StatusBadge({ status, className }: { status: ProjectStatus; className?: string }) {
   return (
     <span
       className={cn(
