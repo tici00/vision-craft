@@ -31,13 +31,13 @@ export async function seedDemoResults(project: Project, config: EditConfiguratio
       start_seconds: start,
       end_seconds: start + slice,
       duration_seconds: slice,
-      decision: score >= 0.55 ? "keep" : "cut",
+      decision: (score >= 0.55 ? "keep" : "cut") as "keep" | "cut",
       score,
       reason:
         score >= 0.55
           ? "Demo placeholder: marked as high-value for UI review."
           : "Demo placeholder: marked as low-value for UI review.",
-      category: CATEGORIES[index % CATEGORIES.length],
+      category: CATEGORIES[index % CATEGORIES.length] ?? "Demo",
     };
   });
 
