@@ -256,7 +256,7 @@ function ProcessingPage() {
   );
 }
 
-function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Metric({ label, value, hint }: { label: string; value: string; hint?: string | undefined }) {
   return (
     <div>
       <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
