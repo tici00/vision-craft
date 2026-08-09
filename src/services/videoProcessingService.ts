@@ -343,7 +343,7 @@ export const videoProcessingService = {
         status: "queued",
         progress: 0,
         current_step: null,
-        steps: PROCESSING_STEP_TEMPLATE,
+        steps: PROCESSING_STEP_TEMPLATE as unknown as Row,
       })
       .select("*")
       .single();
