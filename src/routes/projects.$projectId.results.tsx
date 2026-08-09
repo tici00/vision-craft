@@ -22,7 +22,7 @@ import { projectQueries } from "@/services/queries";
 import { videoProcessingService, NotImplementedError } from "@/services/videoProcessingService";
 import { seedDemoResults } from "@/services/demo/demoResults";
 import { formatDurationLabel, formatPercent, formatTimecode } from "@/lib/format";
-import type { GeneratedVideo, ShortClip } from "@/types/video-editor";
+import type { GeneratedVideo, ShortClip, VideoSegment } from "@/types/video-editor";
 
 export const Route = createFileRoute("/projects/$projectId/results")({
   head: () => ({
@@ -244,7 +244,7 @@ function LongEditPanel({
   onExport,
 }: {
   video: GeneratedVideo;
-  segments: { id: string; startSeconds: number; endSeconds: number; durationSeconds: number; decision: string }[];
+  segments: VideoSegment[];
   onExport: () => void;
 }) {
   const original = video.originalDurationSeconds ?? 0;
@@ -284,7 +284,7 @@ function LongEditPanel({
             <span className="size-2.5 rounded-sm bg-cut" /> Cut
           </span>
         </div>
-        <TimelineRibbon segments={segments as never} totalDuration={original} />
+        <TimelineRibbon segments={segments} totalDuration={original} />
       </div>
     </section>
   );
