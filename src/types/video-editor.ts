@@ -26,13 +26,7 @@ export type GeneratedVideoKind = "highlights" | "long_edit";
 export type ProcessingType = "short_clips" | "highlights" | "long_edit";
 
 /** Real lifecycle of the source-video upload. Never simulated. */
-export type UploadStatus =
-  | "none"
-  | "preparing"
-  | "uploading"
-  | "finalizing"
-  | "uploaded"
-  | "error";
+export type UploadStatus = "none" | "preparing" | "uploading" | "finalizing" | "uploaded" | "error";
 
 export interface Project {
   id: string;
