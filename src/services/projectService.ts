@@ -41,7 +41,8 @@ export function mapProject(row: Row): Project {
   };
 }
 
-async function updateProject(projectId: string, patch: Record<string, unknown>): Promise<Project> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function updateProject(projectId: string, patch: any): Promise<Project> {
   const { data, error } = await supabase
     .from("projects")
     .update(patch)

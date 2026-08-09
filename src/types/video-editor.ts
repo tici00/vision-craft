@@ -25,14 +25,30 @@ export type GeneratedVideoKind = "highlights" | "long_edit";
 
 export type ProcessingType = "short_clips" | "highlights" | "long_edit";
 
+/** Real lifecycle of the source-video upload. Never simulated. */
+export type UploadStatus =
+  | "none"
+  | "preparing"
+  | "uploading"
+  | "finalizing"
+  | "uploaded"
+  | "error";
+
 export interface Project {
   id: string;
   name: string;
   sourceFileName: string | null;
+  /** File name as stored in the bucket, e.g. "original.mp4". */
+  sourceStoredFileName: string | null;
   sourceFileSize: number | null;
   sourceMimeType: string | null;
+  /** Container extension, e.g. "mp4". */
+  sourceFormat: string | null;
   sourceStoragePath: string | null;
   sourceUrl: string | null;
+  sourceUploadedAt: string | null;
+  uploadStatus: UploadStatus;
+  uploadError: string | null;
   durationSeconds: number | null;
   thumbnailUrl: string | null;
   status: ProjectStatus;
