@@ -334,17 +334,60 @@ export const videoProcessingService = {
     return data ? mapConfiguration(data) : null;
   },
 
+  /**
+   * Persists the full analysis configuration. Settings for a disabled output are
+   * still stored, so re-enabling an output restores the user's choices.
+   */
   async saveConfiguration(input: SaveConfigurationInput): Promise<EditConfiguration> {
+    const { projectId, ...config } = input;
     const { data, error } = await supabase
       .from("edit_configurations")
       .upsert(
         {
-          project_id: input.projectId,
-          want_short_clips: input.wantShortClips,
-          want_highlights: input.wantHighlights,
-          want_long_edit: input.wantLongEdit,
-          highlights_target_seconds: input.highlightsTargetSeconds,
-          long_edit_intensity: input.longEditIntensity,
+          project_id: projectId,
+          want_short_clips: config.wantShortClips,
+          want_highlights: config.wantHighlights,
+          want_long_edit: config.wantLongEdit,
+
+          language_mode: config.languageMode,
+          primary_language: config.primaryLanguage,
+          secondary_languages: config.secondaryLanguages,
+          has_multiple_languages: config.hasMultipleLanguages,
+          transcription_language: config.transcriptionLanguage,
+
+          content_types: config.contentTypes,
+          video_context: config.videoContext,
+          main_activity: config.mainActivity,
+          analysis_notes: config.analysisNotes,
+          important_audio_video_flags: config.importantAudioVideoFlags,
+          analysis_mode: config.analysisMode,
+
+          clips_quantity_mode: config.clipsQuantityMode,
+          clips_quantity: config.clipsQuantity,
+          clips_duration_preference: config.clipsDurationPreference,
+          clips_selection_criteria: config.clipsSelectionCriteria,
+          avoid_similar_clips: config.avoidSimilarClips,
+          speech_priority: config.speechPriority,
+          clip_min_seconds: config.clipMinSeconds,
+          clip_max_seconds: config.clipMaxSeconds,
+
+          highlights_duration_mode: config.highlightsDurationMode,
+          highlights_duration_minutes: config.highlightsDurationMinutes,
+          highlights_target_seconds: config.highlightsTargetSeconds,
+          highlights_editing_style: config.highlightsEditingStyle,
+          highlights_criteria: config.highlightsCriteria,
+          highlights_context_level: config.highlightsContextLevel,
+
+          long_edit_intensity: config.longEditIntensity,
+          long_edit_remove_flags: config.longEditRemoveFlags,
+          remove_silences: config.removeSilences,
+          silence_threshold_seconds: config.silenceThresholdSeconds,
+          remove_waiting: config.removeWaiting,
+          remove_repetitions: config.removeRepetitions,
+          remove_low_activity: config.removeLowActivity,
+          preserve_visual_events: config.preserveVisualEvents,
+          preserve_webcam_reactions: config.preserveWebcamReactions,
+          preserve_context_level: config.preserveContextLevel,
         },
         { onConflict: "project_id" },
       )
@@ -352,13 +395,22 @@ export const videoProcessingService = {
       .single();
 
     const types: ProcessingType[] = [];
-    if (input.wantShortClips) types.push("short_clips");
-    if (input.wantHighlights) types.push("highlights");
-    if (input.wantLongEdit) types.push("long_edit");
+    if (config.wantShortClips) types.push("short_clips");
+    if (config.wantHighlights) types.push("highlights");
+    if (config.wantLongEdit) types.push("long_edit");
+
+    const project = await this.getProject(projectId).catch(() => null);
+    const keepAnalysisStatus =
+      project && ["queued", "running", "completed", "error"].includes(project.analysisStatus);
+
     await supabase
       .from("projects")
-      .update({ processing_types: types, status: "ready" })
-      .eq("id", input.projectId);
+      .update({
+        processing_types: types,
+        status: "ready",
+        ...(keepAnalysisStatus ? {} : { analysis_status: "configured" }),
+      })
+      .eq("id", projectId);
 
     return mapConfiguration(unwrap(data, error));
   },
@@ -366,25 +418,61 @@ export const videoProcessingService = {
   /* ----------------------------------------------------------------- jobs */
 
   /**
-   * Enqueues a real job record. A processing worker is not connected yet, so
-   * the job stays `queued` until one picks it up — the UI reflects that
-   * honestly instead of simulating progress.
+   * Enqueues a real job record carrying the full structured request. No worker
+   * is connected yet, so the job stays `queued` / `waiting_for_worker` until a
+   * real pipeline claims it — progress is never simulated.
    */
   async createProcessingJob(projectId: string): Promise<ProcessingJob> {
+    const [project, configuration] = await Promise.all([
+      this.getProject(projectId),
+      this.getConfiguration(projectId),
+    ]);
+    if (!configuration) throw new Error("Configure a análise antes de enviar para processamento.");
+    if (!configuration.wantShortClips && !configuration.wantHighlights && !configuration.wantLongEdit) {
+      throw new Error("Selecione ao menos um resultado antes de enviar para processamento.");
+    }
+    if (!project.sourceStoragePath) {
+      throw new Error("Envie o arquivo de vídeo antes de iniciar o processamento.");
+    }
+
+    const request = buildAnalysisJobRequest(project, configuration);
+
     const { data, error } = await supabase
       .from("processing_jobs")
       .insert({
         project_id: projectId,
         status: "queued",
+        stage: "queued",
+        waiting_for_worker: true,
         progress: 0,
         current_step: null,
         steps: PROCESSING_STEP_TEMPLATE as unknown as Row,
+        request_payload: request as unknown as Row,
       })
       .select("*")
       .single();
-    await supabase.from("projects").update({ status: "queued" }).eq("id", projectId);
+    await supabase
+      .from("projects")
+      .update({
+        status: "queued",
+        analysis_status: "queued",
+        analysis_stage: "queued",
+        analysis_progress: 0,
+        analysis_error: null,
+      })
+      .eq("id", projectId);
     return mapJob(unwrap(data, error));
   },
+
+  /** The exact structured payload a future worker will consume for a project. */
+  async buildJobRequest(projectId: string): Promise<AnalysisJobRequest | null> {
+    const [project, configuration] = await Promise.all([
+      this.getProject(projectId),
+      this.getConfiguration(projectId),
+    ]);
+    return configuration ? buildAnalysisJobRequest(project, configuration) : null;
+  },
+
 
   async getJobStatus(jobId: string): Promise<ProcessingJob> {
     const { data, error } = await supabase
