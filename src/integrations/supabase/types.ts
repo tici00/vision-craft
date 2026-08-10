@@ -16,46 +16,139 @@ export type Database = {
     Tables: {
       edit_configurations: {
         Row: {
+          analysis_mode: Database["public"]["Enums"]["analysis_mode"]
+          analysis_notes: string | null
+          avoid_similar_clips: boolean
           clip_max_seconds: number | null
           clip_min_seconds: number | null
+          clips_duration_preference: string
+          clips_quantity: number | null
+          clips_quantity_mode: string
+          clips_selection_criteria: string[]
+          content_types: string[]
           created_at: string
+          has_multiple_languages: boolean
+          highlights_context_level: Database["public"]["Enums"]["context_level"]
+          highlights_criteria: string[]
+          highlights_duration_minutes: number
+          highlights_duration_mode: string
+          highlights_editing_style: Database["public"]["Enums"]["highlights_style"]
           highlights_target_seconds: number | null
           id: string
+          important_audio_video_flags: string[]
+          language_mode: Database["public"]["Enums"]["language_mode"]
           long_edit_intensity:
             | Database["public"]["Enums"]["edit_intensity"]
             | null
+          long_edit_remove_flags: string[]
+          main_activity: string | null
+          preserve_context_level: Database["public"]["Enums"]["context_level"]
+          preserve_visual_events: boolean
+          preserve_webcam_reactions: boolean
+          primary_language: string
           project_id: string
+          remove_low_activity: boolean
+          remove_repetitions: boolean
+          remove_silences: boolean
+          remove_waiting: boolean
+          secondary_languages: string[]
+          silence_threshold_seconds: number | null
+          speech_priority: Database["public"]["Enums"]["speech_priority"]
+          transcription_language: string | null
           updated_at: string
+          video_context: string | null
           want_highlights: boolean
           want_long_edit: boolean
           want_short_clips: boolean
         }
         Insert: {
+          analysis_mode?: Database["public"]["Enums"]["analysis_mode"]
+          analysis_notes?: string | null
+          avoid_similar_clips?: boolean
           clip_max_seconds?: number | null
           clip_min_seconds?: number | null
+          clips_duration_preference?: string
+          clips_quantity?: number | null
+          clips_quantity_mode?: string
+          clips_selection_criteria?: string[]
+          content_types?: string[]
           created_at?: string
+          has_multiple_languages?: boolean
+          highlights_context_level?: Database["public"]["Enums"]["context_level"]
+          highlights_criteria?: string[]
+          highlights_duration_minutes?: number
+          highlights_duration_mode?: string
+          highlights_editing_style?: Database["public"]["Enums"]["highlights_style"]
           highlights_target_seconds?: number | null
           id?: string
+          important_audio_video_flags?: string[]
+          language_mode?: Database["public"]["Enums"]["language_mode"]
           long_edit_intensity?:
             | Database["public"]["Enums"]["edit_intensity"]
             | null
+          long_edit_remove_flags?: string[]
+          main_activity?: string | null
+          preserve_context_level?: Database["public"]["Enums"]["context_level"]
+          preserve_visual_events?: boolean
+          preserve_webcam_reactions?: boolean
+          primary_language?: string
           project_id: string
+          remove_low_activity?: boolean
+          remove_repetitions?: boolean
+          remove_silences?: boolean
+          remove_waiting?: boolean
+          secondary_languages?: string[]
+          silence_threshold_seconds?: number | null
+          speech_priority?: Database["public"]["Enums"]["speech_priority"]
+          transcription_language?: string | null
           updated_at?: string
+          video_context?: string | null
           want_highlights?: boolean
           want_long_edit?: boolean
           want_short_clips?: boolean
         }
         Update: {
+          analysis_mode?: Database["public"]["Enums"]["analysis_mode"]
+          analysis_notes?: string | null
+          avoid_similar_clips?: boolean
           clip_max_seconds?: number | null
           clip_min_seconds?: number | null
+          clips_duration_preference?: string
+          clips_quantity?: number | null
+          clips_quantity_mode?: string
+          clips_selection_criteria?: string[]
+          content_types?: string[]
           created_at?: string
+          has_multiple_languages?: boolean
+          highlights_context_level?: Database["public"]["Enums"]["context_level"]
+          highlights_criteria?: string[]
+          highlights_duration_minutes?: number
+          highlights_duration_mode?: string
+          highlights_editing_style?: Database["public"]["Enums"]["highlights_style"]
           highlights_target_seconds?: number | null
           id?: string
+          important_audio_video_flags?: string[]
+          language_mode?: Database["public"]["Enums"]["language_mode"]
           long_edit_intensity?:
             | Database["public"]["Enums"]["edit_intensity"]
             | null
+          long_edit_remove_flags?: string[]
+          main_activity?: string | null
+          preserve_context_level?: Database["public"]["Enums"]["context_level"]
+          preserve_visual_events?: boolean
+          preserve_webcam_reactions?: boolean
+          primary_language?: string
           project_id?: string
+          remove_low_activity?: boolean
+          remove_repetitions?: boolean
+          remove_silences?: boolean
+          remove_waiting?: boolean
+          secondary_languages?: string[]
+          silence_threshold_seconds?: number | null
+          speech_priority?: Database["public"]["Enums"]["speech_priority"]
+          transcription_language?: string | null
           updated_at?: string
+          video_context?: string | null
           want_highlights?: boolean
           want_long_edit?: boolean
           want_short_clips?: boolean
@@ -138,10 +231,13 @@ export type Database = {
           progress: number
           project_id: string
           queued_at: string
+          request_payload: Json | null
+          stage: Database["public"]["Enums"]["analysis_stage"]
           started_at: string | null
           status: Database["public"]["Enums"]["job_status"]
           steps: Json
           updated_at: string
+          waiting_for_worker: boolean
         }
         Insert: {
           cancel_requested?: boolean
@@ -154,10 +250,13 @@ export type Database = {
           progress?: number
           project_id: string
           queued_at?: string
+          request_payload?: Json | null
+          stage?: Database["public"]["Enums"]["analysis_stage"]
           started_at?: string | null
           status?: Database["public"]["Enums"]["job_status"]
           steps?: Json
           updated_at?: string
+          waiting_for_worker?: boolean
         }
         Update: {
           cancel_requested?: boolean
@@ -170,10 +269,13 @@ export type Database = {
           progress?: number
           project_id?: string
           queued_at?: string
+          request_payload?: Json | null
+          stage?: Database["public"]["Enums"]["analysis_stage"]
           started_at?: string | null
           status?: Database["public"]["Enums"]["job_status"]
           steps?: Json
           updated_at?: string
+          waiting_for_worker?: boolean
         }
         Relationships: [
           {
@@ -187,9 +289,17 @@ export type Database = {
       }
       projects: {
         Row: {
+          analysis_completed_at: string | null
+          analysis_error: string | null
+          analysis_progress: number
+          analysis_stage: Database["public"]["Enums"]["analysis_stage"] | null
+          analysis_started_at: string | null
+          analysis_status: Database["public"]["Enums"]["analysis_status"]
           created_at: string
+          detected_language: string | null
           duration_seconds: number | null
           id: string
+          language_confidence: number | null
           name: string
           notes: string | null
           processing_types: string[]
@@ -208,9 +318,17 @@ export type Database = {
           upload_status: Database["public"]["Enums"]["upload_status"]
         }
         Insert: {
+          analysis_completed_at?: string | null
+          analysis_error?: string | null
+          analysis_progress?: number
+          analysis_stage?: Database["public"]["Enums"]["analysis_stage"] | null
+          analysis_started_at?: string | null
+          analysis_status?: Database["public"]["Enums"]["analysis_status"]
           created_at?: string
+          detected_language?: string | null
           duration_seconds?: number | null
           id?: string
+          language_confidence?: number | null
           name: string
           notes?: string | null
           processing_types?: string[]
@@ -229,9 +347,17 @@ export type Database = {
           upload_status?: Database["public"]["Enums"]["upload_status"]
         }
         Update: {
+          analysis_completed_at?: string | null
+          analysis_error?: string | null
+          analysis_progress?: number
+          analysis_stage?: Database["public"]["Enums"]["analysis_stage"] | null
+          analysis_started_at?: string | null
+          analysis_status?: Database["public"]["Enums"]["analysis_status"]
           created_at?: string
+          detected_language?: string | null
           duration_seconds?: number | null
           id?: string
+          language_confidence?: number | null
           name?: string
           notes?: string | null
           processing_types?: string[]
@@ -309,46 +435,79 @@ export type Database = {
       }
       video_segments: {
         Row: {
+          analysis_sources: string[]
+          audio_energy_score: number | null
           category: string | null
+          context_score: number | null
           created_at: string
           decision: Database["public"]["Enums"]["segment_decision"]
           duration_seconds: number
           end_seconds: number
           id: string
+          novelty_score: number | null
+          overall_score: number | null
           project_id: string
+          reaction_score: number | null
           reason: string | null
+          reason_codes: string[]
+          reason_summary: string | null
           related_result_id: string | null
           score: number | null
+          speech_score: number | null
           start_seconds: number
+          transcript_score: number | null
           updated_at: string
+          visual_score: number | null
         }
         Insert: {
+          analysis_sources?: string[]
+          audio_energy_score?: number | null
           category?: string | null
+          context_score?: number | null
           created_at?: string
           decision?: Database["public"]["Enums"]["segment_decision"]
           duration_seconds: number
           end_seconds: number
           id?: string
+          novelty_score?: number | null
+          overall_score?: number | null
           project_id: string
+          reaction_score?: number | null
           reason?: string | null
+          reason_codes?: string[]
+          reason_summary?: string | null
           related_result_id?: string | null
           score?: number | null
+          speech_score?: number | null
           start_seconds: number
+          transcript_score?: number | null
           updated_at?: string
+          visual_score?: number | null
         }
         Update: {
+          analysis_sources?: string[]
+          audio_energy_score?: number | null
           category?: string | null
+          context_score?: number | null
           created_at?: string
           decision?: Database["public"]["Enums"]["segment_decision"]
           duration_seconds?: number
           end_seconds?: number
           id?: string
+          novelty_score?: number | null
+          overall_score?: number | null
           project_id?: string
+          reaction_score?: number | null
           reason?: string | null
+          reason_codes?: string[]
+          reason_summary?: string | null
           related_result_id?: string | null
           score?: number | null
+          speech_score?: number | null
           start_seconds?: number
+          transcript_score?: number | null
           updated_at?: string
+          visual_score?: number | null
         }
         Relationships: [
           {
@@ -368,9 +527,34 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      analysis_mode: "audio_only" | "audio_speech" | "multimodal"
+      analysis_stage:
+        | "queued"
+        | "preparing"
+        | "extracting_audio"
+        | "detecting_language"
+        | "transcribing"
+        | "analyzing_audio"
+        | "analyzing_video"
+        | "combining_signals"
+        | "scoring_segments"
+        | "preparing_outputs"
+        | "rendering"
+        | "completed"
+        | "failed"
+      analysis_status:
+        | "not_configured"
+        | "configured"
+        | "queued"
+        | "running"
+        | "completed"
+        | "error"
+      context_level: "minimal" | "balanced" | "high"
       edit_intensity: "conservative" | "balanced" | "aggressive"
       generated_video_kind: "highlights" | "long_edit"
+      highlights_style: "dynamic" | "balanced" | "complete"
       job_status: "queued" | "running" | "completed" | "cancelled" | "error"
+      language_mode: "manual" | "auto"
       project_status:
         | "draft"
         | "ready"
@@ -382,6 +566,7 @@ export type Database = {
         | "completed"
         | "error"
       segment_decision: "keep" | "cut" | "undecided"
+      speech_priority: "always" | "preferred" | "optional"
       upload_status:
         | "none"
         | "preparing"
@@ -516,9 +701,36 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      analysis_mode: ["audio_only", "audio_speech", "multimodal"],
+      analysis_stage: [
+        "queued",
+        "preparing",
+        "extracting_audio",
+        "detecting_language",
+        "transcribing",
+        "analyzing_audio",
+        "analyzing_video",
+        "combining_signals",
+        "scoring_segments",
+        "preparing_outputs",
+        "rendering",
+        "completed",
+        "failed",
+      ],
+      analysis_status: [
+        "not_configured",
+        "configured",
+        "queued",
+        "running",
+        "completed",
+        "error",
+      ],
+      context_level: ["minimal", "balanced", "high"],
       edit_intensity: ["conservative", "balanced", "aggressive"],
       generated_video_kind: ["highlights", "long_edit"],
+      highlights_style: ["dynamic", "balanced", "complete"],
       job_status: ["queued", "running", "completed", "cancelled", "error"],
+      language_mode: ["manual", "auto"],
       project_status: [
         "draft",
         "ready",
@@ -531,6 +743,7 @@ export const Constants = {
         "error",
       ],
       segment_decision: ["keep", "cut", "undecided"],
+      speech_priority: ["always", "preferred", "optional"],
       upload_status: [
         "none",
         "preparing",
