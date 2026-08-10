@@ -1,13 +1,25 @@
 import { supabase } from "@/integrations/supabase/client";
+import { DEFAULT_LANGUAGE } from "@/lib/analysis-options";
+import { buildAnalysisJobRequest } from "@/services/analysis/analysisRequest";
+import type { AnalysisJobRequest } from "@/services/analysis/contracts";
 import { mapProject, projectService } from "@/services/projectService";
 import { videoMetadataService, type VideoFileMetadata } from "@/services/videoMetadataService";
 import { videoUploadService, type UploadProgress } from "@/services/videoUploadService";
 import {
   PROCESSING_STEP_TEMPLATE,
+  type AnalysisMode,
+  type AnalysisSource,
+  type AnalysisStage,
+  type ClipsDurationPreference,
+  type ClipsQuantityMode,
+  type ContextLevel,
   type EditConfiguration,
   type EditIntensity,
   type GeneratedVideo,
   type GeneratedVideoKind,
+  type HighlightsDurationMode,
+  type HighlightsStyle,
+  type LanguageMode,
   type ProcessingJob,
   type ProcessingStep,
   type ProcessingType,
@@ -16,8 +28,10 @@ import {
   type ProjectStatus,
   type SegmentDecision,
   type ShortClip,
+  type SpeechPriority,
   type VideoSegment,
 } from "@/types/video-editor";
+
 
 /**
  * videoProcessingService — the single boundary between the UI and persistence /
