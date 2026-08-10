@@ -1,13 +1,25 @@
 import { supabase } from "@/integrations/supabase/client";
+import { DEFAULT_LANGUAGE } from "@/lib/analysis-options";
+import { buildAnalysisJobRequest } from "@/services/analysis/analysisRequest";
+import type { AnalysisJobRequest } from "@/services/analysis/contracts";
 import { mapProject, projectService } from "@/services/projectService";
 import { videoMetadataService, type VideoFileMetadata } from "@/services/videoMetadataService";
 import { videoUploadService, type UploadProgress } from "@/services/videoUploadService";
 import {
   PROCESSING_STEP_TEMPLATE,
+  type AnalysisMode,
+  type AnalysisSource,
+  type AnalysisStage,
+  type ClipsDurationPreference,
+  type ClipsQuantityMode,
+  type ContextLevel,
   type EditConfiguration,
   type EditIntensity,
   type GeneratedVideo,
   type GeneratedVideoKind,
+  type HighlightsDurationMode,
+  type HighlightsStyle,
+  type LanguageMode,
   type ProcessingJob,
   type ProcessingStep,
   type ProcessingType,
@@ -16,8 +28,10 @@ import {
   type ProjectStatus,
   type SegmentDecision,
   type ShortClip,
+  type SpeechPriority,
   type VideoSegment,
 } from "@/types/video-editor";
+
 
 /**
  * videoProcessingService — the single boundary between the UI and persistence /
@@ -44,6 +58,10 @@ export class NotImplementedError extends Error {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = any;
 
+function num(value: unknown): number | null {
+  return value == null ? null : Number(value);
+}
+
 function mapConfiguration(row: Row): EditConfiguration {
   return {
     id: row.id,
@@ -51,10 +69,46 @@ function mapConfiguration(row: Row): EditConfiguration {
     wantShortClips: row.want_short_clips,
     wantHighlights: row.want_highlights,
     wantLongEdit: row.want_long_edit,
-    highlightsTargetSeconds: row.highlights_target_seconds,
-    longEditIntensity: row.long_edit_intensity as EditIntensity | null,
-    clipMinSeconds: row.clip_min_seconds,
-    clipMaxSeconds: row.clip_max_seconds,
+
+    languageMode: (row.language_mode ?? "manual") as LanguageMode,
+    primaryLanguage: row.primary_language ?? DEFAULT_LANGUAGE,
+    secondaryLanguages: (row.secondary_languages ?? []) as string[],
+    hasMultipleLanguages: row.has_multiple_languages ?? false,
+    transcriptionLanguage: row.transcription_language ?? row.primary_language ?? DEFAULT_LANGUAGE,
+
+    contentTypes: (row.content_types ?? []) as string[],
+    videoContext: row.video_context ?? null,
+    mainActivity: row.main_activity ?? null,
+    analysisNotes: row.analysis_notes ?? null,
+    importantAudioVideoFlags: (row.important_audio_video_flags ?? []) as string[],
+    analysisMode: (row.analysis_mode ?? "multimodal") as AnalysisMode,
+
+    clipsQuantityMode: (row.clips_quantity_mode ?? "auto") as ClipsQuantityMode,
+    clipsQuantity: num(row.clips_quantity),
+    clipsDurationPreference: (row.clips_duration_preference ?? "auto") as ClipsDurationPreference,
+    clipsSelectionCriteria: (row.clips_selection_criteria ?? []) as string[],
+    avoidSimilarClips: row.avoid_similar_clips ?? true,
+    speechPriority: (row.speech_priority ?? "preferred") as SpeechPriority,
+    clipMinSeconds: num(row.clip_min_seconds),
+    clipMaxSeconds: num(row.clip_max_seconds),
+
+    highlightsDurationMode: (row.highlights_duration_mode ?? "preset") as HighlightsDurationMode,
+    highlightsDurationMinutes: Number(row.highlights_duration_minutes ?? 15),
+    highlightsTargetSeconds: num(row.highlights_target_seconds),
+    highlightsEditingStyle: (row.highlights_editing_style ?? "balanced") as HighlightsStyle,
+    highlightsCriteria: (row.highlights_criteria ?? []) as string[],
+    highlightsContextLevel: (row.highlights_context_level ?? "balanced") as ContextLevel,
+
+    longEditIntensity: (row.long_edit_intensity ?? null) as EditIntensity | null,
+    longEditRemoveFlags: (row.long_edit_remove_flags ?? []) as string[],
+    removeSilences: row.remove_silences ?? true,
+    silenceThresholdSeconds: num(row.silence_threshold_seconds),
+    removeWaiting: row.remove_waiting ?? true,
+    removeRepetitions: row.remove_repetitions ?? false,
+    removeLowActivity: row.remove_low_activity ?? true,
+    preserveVisualEvents: row.preserve_visual_events ?? true,
+    preserveWebcamReactions: row.preserve_webcam_reactions ?? true,
+    preserveContextLevel: (row.preserve_context_level ?? "balanced") as ContextLevel,
   };
 }
 
@@ -65,6 +119,8 @@ function mapJob(row: Row): ProcessingJob {
     status: row.status,
     progress: Number(row.progress ?? 0),
     currentStep: row.current_step,
+    stage: (row.stage ?? "queued") as AnalysisStage,
+    waitingForWorker: row.waiting_for_worker ?? true,
     steps: (row.steps ?? []) as ProcessingStep[],
     queuedAt: row.queued_at,
     startedAt: row.started_at,
@@ -83,12 +139,24 @@ function mapSegment(row: Row): VideoSegment {
     endSeconds: Number(row.end_seconds),
     durationSeconds: Number(row.duration_seconds),
     decision: row.decision as SegmentDecision,
-    score: row.score == null ? null : Number(row.score),
+    score: num(row.score),
     reason: row.reason,
     category: row.category,
     relatedResultId: row.related_result_id,
+    speechScore: num(row.speech_score),
+    transcriptScore: num(row.transcript_score),
+    visualScore: num(row.visual_score),
+    reactionScore: num(row.reaction_score),
+    contextScore: num(row.context_score),
+    audioEnergyScore: num(row.audio_energy_score),
+    noveltyScore: num(row.novelty_score),
+    overallScore: num(row.overall_score),
+    reasonCodes: (row.reason_codes ?? []) as string[],
+    reasonSummary: row.reason_summary ?? null,
+    analysisSources: (row.analysis_sources ?? []) as AnalysisSource[],
   };
 }
+
 
 function mapClip(row: Row): ShortClip {
   return {
@@ -148,9 +216,48 @@ export interface SaveConfigurationInput {
   wantShortClips: boolean;
   wantHighlights: boolean;
   wantLongEdit: boolean;
+
+  languageMode: LanguageMode;
+  primaryLanguage: string;
+  secondaryLanguages: string[];
+  hasMultipleLanguages: boolean;
+  transcriptionLanguage: string | null;
+
+  contentTypes: string[];
+  videoContext: string | null;
+  mainActivity: string | null;
+  analysisNotes: string | null;
+  importantAudioVideoFlags: string[];
+  analysisMode: AnalysisMode;
+
+  clipsQuantityMode: ClipsQuantityMode;
+  clipsQuantity: number | null;
+  clipsDurationPreference: ClipsDurationPreference;
+  clipsSelectionCriteria: string[];
+  avoidSimilarClips: boolean;
+  speechPriority: SpeechPriority;
+  clipMinSeconds: number | null;
+  clipMaxSeconds: number | null;
+
+  highlightsDurationMode: HighlightsDurationMode;
+  highlightsDurationMinutes: number | null;
   highlightsTargetSeconds: number | null;
+  highlightsEditingStyle: HighlightsStyle;
+  highlightsCriteria: string[];
+  highlightsContextLevel: ContextLevel;
+
   longEditIntensity: EditIntensity | null;
+  longEditRemoveFlags: string[];
+  removeSilences: boolean;
+  silenceThresholdSeconds: number | null;
+  removeWaiting: boolean;
+  removeRepetitions: boolean;
+  removeLowActivity: boolean;
+  preserveVisualEvents: boolean;
+  preserveWebcamReactions: boolean;
+  preserveContextLevel: ContextLevel;
 }
+
 
 export const videoProcessingService = {
   /* ------------------------------------------------------------- projects */
@@ -266,17 +373,60 @@ export const videoProcessingService = {
     return data ? mapConfiguration(data) : null;
   },
 
+  /**
+   * Persists the full analysis configuration. Settings for a disabled output are
+   * still stored, so re-enabling an output restores the user's choices.
+   */
   async saveConfiguration(input: SaveConfigurationInput): Promise<EditConfiguration> {
+    const { projectId, ...config } = input;
     const { data, error } = await supabase
       .from("edit_configurations")
       .upsert(
         {
-          project_id: input.projectId,
-          want_short_clips: input.wantShortClips,
-          want_highlights: input.wantHighlights,
-          want_long_edit: input.wantLongEdit,
-          highlights_target_seconds: input.highlightsTargetSeconds,
-          long_edit_intensity: input.longEditIntensity,
+          project_id: projectId,
+          want_short_clips: config.wantShortClips,
+          want_highlights: config.wantHighlights,
+          want_long_edit: config.wantLongEdit,
+
+          language_mode: config.languageMode,
+          primary_language: config.primaryLanguage,
+          secondary_languages: config.secondaryLanguages,
+          has_multiple_languages: config.hasMultipleLanguages,
+          transcription_language: config.transcriptionLanguage,
+
+          content_types: config.contentTypes,
+          video_context: config.videoContext,
+          main_activity: config.mainActivity,
+          analysis_notes: config.analysisNotes,
+          important_audio_video_flags: config.importantAudioVideoFlags,
+          analysis_mode: config.analysisMode,
+
+          clips_quantity_mode: config.clipsQuantityMode,
+          clips_quantity: config.clipsQuantity,
+          clips_duration_preference: config.clipsDurationPreference,
+          clips_selection_criteria: config.clipsSelectionCriteria,
+          avoid_similar_clips: config.avoidSimilarClips,
+          speech_priority: config.speechPriority,
+          clip_min_seconds: config.clipMinSeconds,
+          clip_max_seconds: config.clipMaxSeconds,
+
+          highlights_duration_mode: config.highlightsDurationMode,
+          highlights_duration_minutes: config.highlightsDurationMinutes ?? 15,
+          highlights_target_seconds: config.highlightsTargetSeconds,
+          highlights_editing_style: config.highlightsEditingStyle,
+          highlights_criteria: config.highlightsCriteria,
+          highlights_context_level: config.highlightsContextLevel,
+
+          long_edit_intensity: config.longEditIntensity,
+          long_edit_remove_flags: config.longEditRemoveFlags,
+          remove_silences: config.removeSilences,
+          silence_threshold_seconds: config.silenceThresholdSeconds,
+          remove_waiting: config.removeWaiting,
+          remove_repetitions: config.removeRepetitions,
+          remove_low_activity: config.removeLowActivity,
+          preserve_visual_events: config.preserveVisualEvents,
+          preserve_webcam_reactions: config.preserveWebcamReactions,
+          preserve_context_level: config.preserveContextLevel,
         },
         { onConflict: "project_id" },
       )
@@ -284,13 +434,22 @@ export const videoProcessingService = {
       .single();
 
     const types: ProcessingType[] = [];
-    if (input.wantShortClips) types.push("short_clips");
-    if (input.wantHighlights) types.push("highlights");
-    if (input.wantLongEdit) types.push("long_edit");
+    if (config.wantShortClips) types.push("short_clips");
+    if (config.wantHighlights) types.push("highlights");
+    if (config.wantLongEdit) types.push("long_edit");
+
+    const project = await this.getProject(projectId).catch(() => null);
+    const keepAnalysisStatus =
+      project && ["queued", "running", "completed", "error"].includes(project.analysisStatus);
+
     await supabase
       .from("projects")
-      .update({ processing_types: types, status: "ready" })
-      .eq("id", input.projectId);
+      .update({
+        processing_types: types,
+        status: "ready",
+        ...(keepAnalysisStatus ? {} : { analysis_status: "configured" }),
+      })
+      .eq("id", projectId);
 
     return mapConfiguration(unwrap(data, error));
   },
@@ -298,25 +457,61 @@ export const videoProcessingService = {
   /* ----------------------------------------------------------------- jobs */
 
   /**
-   * Enqueues a real job record. A processing worker is not connected yet, so
-   * the job stays `queued` until one picks it up — the UI reflects that
-   * honestly instead of simulating progress.
+   * Enqueues a real job record carrying the full structured request. No worker
+   * is connected yet, so the job stays `queued` / `waiting_for_worker` until a
+   * real pipeline claims it — progress is never simulated.
    */
   async createProcessingJob(projectId: string): Promise<ProcessingJob> {
+    const [project, configuration] = await Promise.all([
+      this.getProject(projectId),
+      this.getConfiguration(projectId),
+    ]);
+    if (!configuration) throw new Error("Configure a análise antes de enviar para processamento.");
+    if (!configuration.wantShortClips && !configuration.wantHighlights && !configuration.wantLongEdit) {
+      throw new Error("Selecione ao menos um resultado antes de enviar para processamento.");
+    }
+    if (!project.sourceStoragePath) {
+      throw new Error("Envie o arquivo de vídeo antes de iniciar o processamento.");
+    }
+
+    const request = buildAnalysisJobRequest(project, configuration);
+
     const { data, error } = await supabase
       .from("processing_jobs")
       .insert({
         project_id: projectId,
         status: "queued",
+        stage: "queued",
+        waiting_for_worker: true,
         progress: 0,
         current_step: null,
         steps: PROCESSING_STEP_TEMPLATE as unknown as Row,
+        request_payload: request as unknown as Row,
       })
       .select("*")
       .single();
-    await supabase.from("projects").update({ status: "queued" }).eq("id", projectId);
+    await supabase
+      .from("projects")
+      .update({
+        status: "queued",
+        analysis_status: "queued",
+        analysis_stage: "queued",
+        analysis_progress: 0,
+        analysis_error: null,
+      })
+      .eq("id", projectId);
     return mapJob(unwrap(data, error));
   },
+
+  /** The exact structured payload a future worker will consume for a project. */
+  async buildJobRequest(projectId: string): Promise<AnalysisJobRequest | null> {
+    const [project, configuration] = await Promise.all([
+      this.getProject(projectId),
+      this.getConfiguration(projectId),
+    ]);
+    return configuration ? buildAnalysisJobRequest(project, configuration) : null;
+  },
+
 
   async getJobStatus(jobId: string): Promise<ProcessingJob> {
     const { data, error } = await supabase

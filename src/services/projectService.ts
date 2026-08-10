@@ -1,7 +1,15 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { VideoFileMetadata } from "@/services/videoMetadataService";
 import { videoUploadService, type UploadedSourceVideo } from "@/services/videoUploadService";
-import type { ProcessingType, Project, ProjectStatus, UploadStatus } from "@/types/video-editor";
+import type {
+  AnalysisStage,
+  AnalysisStatus,
+  ProcessingType,
+  Project,
+  ProjectStatus,
+  UploadStatus,
+} from "@/types/video-editor";
+
 
 /**
  * projectService — persistence for projects and their real source-video
@@ -31,10 +39,19 @@ export function mapProject(row: Row): Project {
     status: row.status as ProjectStatus,
     processingTypes: (row.processing_types ?? []) as ProcessingType[],
     notes: row.notes,
+    analysisStatus: (row.analysis_status ?? "not_configured") as AnalysisStatus,
+    analysisProgress: Number(row.analysis_progress ?? 0),
+    analysisStage: (row.analysis_stage ?? null) as AnalysisStage | null,
+    detectedLanguage: row.detected_language ?? null,
+    languageConfidence: row.language_confidence == null ? null : Number(row.language_confidence),
+    analysisError: row.analysis_error ?? null,
+    analysisStartedAt: row.analysis_started_at ?? null,
+    analysisCompletedAt: row.analysis_completed_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
+
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function updateProject(projectId: string, patch: any): Promise<Project> {
