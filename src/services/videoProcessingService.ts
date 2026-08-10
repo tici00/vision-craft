@@ -411,7 +411,7 @@ export const videoProcessingService = {
           clip_max_seconds: config.clipMaxSeconds,
 
           highlights_duration_mode: config.highlightsDurationMode,
-          highlights_duration_minutes: config.highlightsDurationMinutes,
+          highlights_duration_minutes: config.highlightsDurationMinutes ?? 15,
           highlights_target_seconds: config.highlightsTargetSeconds,
           highlights_editing_style: config.highlightsEditingStyle,
           highlights_criteria: config.highlightsCriteria,
