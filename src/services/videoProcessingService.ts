@@ -216,9 +216,48 @@ export interface SaveConfigurationInput {
   wantShortClips: boolean;
   wantHighlights: boolean;
   wantLongEdit: boolean;
+
+  languageMode: LanguageMode;
+  primaryLanguage: string;
+  secondaryLanguages: string[];
+  hasMultipleLanguages: boolean;
+  transcriptionLanguage: string | null;
+
+  contentTypes: string[];
+  videoContext: string | null;
+  mainActivity: string | null;
+  analysisNotes: string | null;
+  importantAudioVideoFlags: string[];
+  analysisMode: AnalysisMode;
+
+  clipsQuantityMode: ClipsQuantityMode;
+  clipsQuantity: number | null;
+  clipsDurationPreference: ClipsDurationPreference;
+  clipsSelectionCriteria: string[];
+  avoidSimilarClips: boolean;
+  speechPriority: SpeechPriority;
+  clipMinSeconds: number | null;
+  clipMaxSeconds: number | null;
+
+  highlightsDurationMode: HighlightsDurationMode;
+  highlightsDurationMinutes: number | null;
   highlightsTargetSeconds: number | null;
+  highlightsEditingStyle: HighlightsStyle;
+  highlightsCriteria: string[];
+  highlightsContextLevel: ContextLevel;
+
   longEditIntensity: EditIntensity | null;
+  longEditRemoveFlags: string[];
+  removeSilences: boolean;
+  silenceThresholdSeconds: number | null;
+  removeWaiting: boolean;
+  removeRepetitions: boolean;
+  removeLowActivity: boolean;
+  preserveVisualEvents: boolean;
+  preserveWebcamReactions: boolean;
+  preserveContextLevel: ContextLevel;
 }
+
 
 export const videoProcessingService = {
   /* ------------------------------------------------------------- projects */
