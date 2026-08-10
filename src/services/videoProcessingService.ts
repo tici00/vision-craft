@@ -44,6 +44,10 @@ export class NotImplementedError extends Error {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = any;
 
+function num(value: unknown): number | null {
+  return value == null ? null : Number(value);
+}
+
 function mapConfiguration(row: Row): EditConfiguration {
   return {
     id: row.id,
@@ -51,10 +55,46 @@ function mapConfiguration(row: Row): EditConfiguration {
     wantShortClips: row.want_short_clips,
     wantHighlights: row.want_highlights,
     wantLongEdit: row.want_long_edit,
-    highlightsTargetSeconds: row.highlights_target_seconds,
-    longEditIntensity: row.long_edit_intensity as EditIntensity | null,
-    clipMinSeconds: row.clip_min_seconds,
-    clipMaxSeconds: row.clip_max_seconds,
+
+    languageMode: (row.language_mode ?? "manual") as LanguageMode,
+    primaryLanguage: row.primary_language ?? DEFAULT_LANGUAGE,
+    secondaryLanguages: (row.secondary_languages ?? []) as string[],
+    hasMultipleLanguages: row.has_multiple_languages ?? false,
+    transcriptionLanguage: row.transcription_language ?? row.primary_language ?? DEFAULT_LANGUAGE,
+
+    contentTypes: (row.content_types ?? []) as string[],
+    videoContext: row.video_context ?? null,
+    mainActivity: row.main_activity ?? null,
+    analysisNotes: row.analysis_notes ?? null,
+    importantAudioVideoFlags: (row.important_audio_video_flags ?? []) as string[],
+    analysisMode: (row.analysis_mode ?? "multimodal") as AnalysisMode,
+
+    clipsQuantityMode: (row.clips_quantity_mode ?? "auto") as ClipsQuantityMode,
+    clipsQuantity: num(row.clips_quantity),
+    clipsDurationPreference: (row.clips_duration_preference ?? "auto") as ClipsDurationPreference,
+    clipsSelectionCriteria: (row.clips_selection_criteria ?? []) as string[],
+    avoidSimilarClips: row.avoid_similar_clips ?? true,
+    speechPriority: (row.speech_priority ?? "preferred") as SpeechPriority,
+    clipMinSeconds: num(row.clip_min_seconds),
+    clipMaxSeconds: num(row.clip_max_seconds),
+
+    highlightsDurationMode: (row.highlights_duration_mode ?? "preset") as HighlightsDurationMode,
+    highlightsDurationMinutes: Number(row.highlights_duration_minutes ?? 15),
+    highlightsTargetSeconds: num(row.highlights_target_seconds),
+    highlightsEditingStyle: (row.highlights_editing_style ?? "balanced") as HighlightsStyle,
+    highlightsCriteria: (row.highlights_criteria ?? []) as string[],
+    highlightsContextLevel: (row.highlights_context_level ?? "balanced") as ContextLevel,
+
+    longEditIntensity: (row.long_edit_intensity ?? null) as EditIntensity | null,
+    longEditRemoveFlags: (row.long_edit_remove_flags ?? []) as string[],
+    removeSilences: row.remove_silences ?? true,
+    silenceThresholdSeconds: num(row.silence_threshold_seconds),
+    removeWaiting: row.remove_waiting ?? true,
+    removeRepetitions: row.remove_repetitions ?? false,
+    removeLowActivity: row.remove_low_activity ?? true,
+    preserveVisualEvents: row.preserve_visual_events ?? true,
+    preserveWebcamReactions: row.preserve_webcam_reactions ?? true,
+    preserveContextLevel: (row.preserve_context_level ?? "balanced") as ContextLevel,
   };
 }
 
@@ -65,6 +105,8 @@ function mapJob(row: Row): ProcessingJob {
     status: row.status,
     progress: Number(row.progress ?? 0),
     currentStep: row.current_step,
+    stage: (row.stage ?? "queued") as AnalysisStage,
+    waitingForWorker: row.waiting_for_worker ?? true,
     steps: (row.steps ?? []) as ProcessingStep[],
     queuedAt: row.queued_at,
     startedAt: row.started_at,
@@ -83,12 +125,24 @@ function mapSegment(row: Row): VideoSegment {
     endSeconds: Number(row.end_seconds),
     durationSeconds: Number(row.duration_seconds),
     decision: row.decision as SegmentDecision,
-    score: row.score == null ? null : Number(row.score),
+    score: num(row.score),
     reason: row.reason,
     category: row.category,
     relatedResultId: row.related_result_id,
+    speechScore: num(row.speech_score),
+    transcriptScore: num(row.transcript_score),
+    visualScore: num(row.visual_score),
+    reactionScore: num(row.reaction_score),
+    contextScore: num(row.context_score),
+    audioEnergyScore: num(row.audio_energy_score),
+    noveltyScore: num(row.novelty_score),
+    overallScore: num(row.overall_score),
+    reasonCodes: (row.reason_codes ?? []) as string[],
+    reasonSummary: row.reason_summary ?? null,
+    analysisSources: (row.analysis_sources ?? []) as AnalysisSource[],
   };
 }
+
 
 function mapClip(row: Row): ShortClip {
   return {
