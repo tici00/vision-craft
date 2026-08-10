@@ -73,7 +73,7 @@ export const Route = createFileRoute("/projects/$projectId/configure")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: ConfigurePage;
+  component: ConfigurePage,
 });
 
 type FormState = Omit<EditConfiguration, "id" | "projectId">;
