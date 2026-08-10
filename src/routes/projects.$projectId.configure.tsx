@@ -520,12 +520,13 @@ function ConfigurePage() {
                             onChange={(event) =>
                               set(
                                 "highlightsDurationMinutes",
-                                event.target.value
+                              event.target.value
                                   ? Math.min(
                                       HIGHLIGHTS_MAX_MINUTES,
                                       Math.max(1, Number(event.target.value)),
                                     )
-                                  : null,
+                                  : 1,
+
                               )
                             }
                           />
