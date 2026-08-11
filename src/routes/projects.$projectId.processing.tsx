@@ -259,14 +259,20 @@ function ProcessingPage() {
               <div className="rounded-xl border border-info/30 bg-info/8 p-5">
                 <div className="flex items-center gap-2 text-sm font-medium text-info">
                   <Info className="size-4" />
-                  No worker connected
+                  {capabilities.data?.mediaWorkerConfigured
+                    ? "Pipeline real conectado"
+                    : "Renderização externa pendente"}
                 </div>
                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                  This job is a real queue record. Transcription, silence detection, visual analysis
-                  and rendering will be performed by a processing worker that updates this job's
-                  status, progress and steps. Progress is never simulated here.
+                  {job.data.stageMessage ?? ANALYSIS_STAGE_LABEL[job.data.stage]}
                 </p>
+                {!capabilities.data?.mediaWorkerConfigured && (
+                  <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                    {capabilities.data?.renderWorkerSetupMessage}
+                  </p>
+                )}
               </div>
+
 
               <div className="panel p-6">
                 <div className="flex items-center gap-2 text-sm font-medium text-foreground">
