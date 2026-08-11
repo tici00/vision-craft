@@ -14,6 +14,84 @@ export type Database = {
   }
   public: {
     Tables: {
+      clip_candidates: {
+        Row: {
+          created_at: string
+          criteria: string[]
+          description: string | null
+          duration_seconds: number
+          end_seconds: number
+          has_speech: boolean | null
+          id: string
+          job_id: string | null
+          order_index: number
+          project_id: string
+          reason: string | null
+          score: number | null
+          start_seconds: number
+          status: string
+          status_message: string | null
+          title: string
+          topic: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          criteria?: string[]
+          description?: string | null
+          duration_seconds: number
+          end_seconds: number
+          has_speech?: boolean | null
+          id?: string
+          job_id?: string | null
+          order_index?: number
+          project_id: string
+          reason?: string | null
+          score?: number | null
+          start_seconds: number
+          status?: string
+          status_message?: string | null
+          title?: string
+          topic?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          criteria?: string[]
+          description?: string | null
+          duration_seconds?: number
+          end_seconds?: number
+          has_speech?: boolean | null
+          id?: string
+          job_id?: string | null
+          order_index?: number
+          project_id?: string
+          reason?: string | null
+          score?: number | null
+          start_seconds?: number
+          status?: string
+          status_message?: string | null
+          title?: string
+          topic?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clip_candidates_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "processing_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clip_candidates_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       edit_configurations: {
         Row: {
           analysis_mode: Database["public"]["Enums"]["analysis_mode"]
@@ -170,10 +248,14 @@ export type Database = {
           final_duration_seconds: number | null
           id: string
           kind: Database["public"]["Enums"]["generated_video_kind"]
+          metadata: Json
+          order_index: number
           original_duration_seconds: number | null
           project_id: string
           removed_seconds: number | null
           segment_ids: string[]
+          source_end_seconds: number | null
+          source_start_seconds: number | null
           thumbnail_url: string | null
           updated_at: string
           video_storage_path: string | null
@@ -185,10 +267,14 @@ export type Database = {
           final_duration_seconds?: number | null
           id?: string
           kind: Database["public"]["Enums"]["generated_video_kind"]
+          metadata?: Json
+          order_index?: number
           original_duration_seconds?: number | null
           project_id: string
           removed_seconds?: number | null
           segment_ids?: string[]
+          source_end_seconds?: number | null
+          source_start_seconds?: number | null
           thumbnail_url?: string | null
           updated_at?: string
           video_storage_path?: string | null
@@ -200,10 +286,14 @@ export type Database = {
           final_duration_seconds?: number | null
           id?: string
           kind?: Database["public"]["Enums"]["generated_video_kind"]
+          metadata?: Json
+          order_index?: number
           original_duration_seconds?: number | null
           project_id?: string
           removed_seconds?: number | null
           segment_ids?: string[]
+          source_end_seconds?: number | null
+          source_start_seconds?: number | null
           thumbnail_url?: string | null
           updated_at?: string
           video_storage_path?: string | null
@@ -226,13 +316,17 @@ export type Database = {
           current_step: string | null
           error_message: string | null
           estimated_seconds_remaining: number | null
+          failed_stage: Database["public"]["Enums"]["analysis_stage"] | null
           finished_at: string | null
           id: string
+          last_heartbeat_at: string | null
+          logs: Json
           progress: number
           project_id: string
           queued_at: string
           request_payload: Json | null
           stage: Database["public"]["Enums"]["analysis_stage"]
+          stage_message: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["job_status"]
           steps: Json
@@ -245,13 +339,17 @@ export type Database = {
           current_step?: string | null
           error_message?: string | null
           estimated_seconds_remaining?: number | null
+          failed_stage?: Database["public"]["Enums"]["analysis_stage"] | null
           finished_at?: string | null
           id?: string
+          last_heartbeat_at?: string | null
+          logs?: Json
           progress?: number
           project_id: string
           queued_at?: string
           request_payload?: Json | null
           stage?: Database["public"]["Enums"]["analysis_stage"]
+          stage_message?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["job_status"]
           steps?: Json
@@ -264,13 +362,17 @@ export type Database = {
           current_step?: string | null
           error_message?: string | null
           estimated_seconds_remaining?: number | null
+          failed_stage?: Database["public"]["Enums"]["analysis_stage"] | null
           finished_at?: string | null
           id?: string
+          last_heartbeat_at?: string | null
+          logs?: Json
           progress?: number
           project_id?: string
           queued_at?: string
           request_payload?: Json | null
           stage?: Database["public"]["Enums"]["analysis_stage"]
+          stage_message?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["job_status"]
           steps?: Json
@@ -280,6 +382,51 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "processing_jobs_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      processing_usage: {
+        Row: {
+          created_at: string
+          id: string
+          job_id: string | null
+          project_id: string | null
+          rendered_clips: number | null
+          source_duration_seconds: number | null
+          transcribed_seconds: number | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          project_id?: string | null
+          rendered_clips?: number | null
+          source_duration_seconds?: number | null
+          transcribed_seconds?: number | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          project_id?: string | null
+          rendered_clips?: number | null
+          source_duration_seconds?: number | null
+          transcribed_seconds?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "processing_usage_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "processing_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "processing_usage_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
@@ -379,13 +526,22 @@ export type Database = {
       }
       short_clips: {
         Row: {
+          candidate_id: string | null
           category: string | null
           confidence: number | null
           created_at: string
+          criteria: string[]
           duration_seconds: number
+          file_size_bytes: number | null
           id: string
+          job_id: string | null
           kept: boolean
+          order_index: number
           project_id: string
+          reason: string | null
+          render_error: string | null
+          render_status: string
+          source_end_seconds: number | null
           source_start_seconds: number
           thumbnail_url: string | null
           title: string
@@ -394,13 +550,22 @@ export type Database = {
           video_url: string | null
         }
         Insert: {
+          candidate_id?: string | null
           category?: string | null
           confidence?: number | null
           created_at?: string
+          criteria?: string[]
           duration_seconds: number
+          file_size_bytes?: number | null
           id?: string
+          job_id?: string | null
           kept?: boolean
+          order_index?: number
           project_id: string
+          reason?: string | null
+          render_error?: string | null
+          render_status?: string
+          source_end_seconds?: number | null
           source_start_seconds: number
           thumbnail_url?: string | null
           title: string
@@ -409,13 +574,22 @@ export type Database = {
           video_url?: string | null
         }
         Update: {
+          candidate_id?: string | null
           category?: string | null
           confidence?: number | null
           created_at?: string
+          criteria?: string[]
           duration_seconds?: number
+          file_size_bytes?: number | null
           id?: string
+          job_id?: string | null
           kept?: boolean
+          order_index?: number
           project_id?: string
+          reason?: string | null
+          render_error?: string | null
+          render_status?: string
+          source_end_seconds?: number | null
           source_start_seconds?: number
           thumbnail_url?: string | null
           title?: string
@@ -425,7 +599,90 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "short_clips_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "clip_candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "short_clips_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "processing_jobs"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "short_clips_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transcriptions: {
+        Row: {
+          created_at: string
+          detected_language: string | null
+          duration_seconds: number | null
+          id: string
+          job_id: string | null
+          language: string | null
+          model: string | null
+          project_id: string
+          provider: string | null
+          requested_language: string | null
+          segments: Json
+          source_kind: string | null
+          source_storage_path: string | null
+          text: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          detected_language?: string | null
+          duration_seconds?: number | null
+          id?: string
+          job_id?: string | null
+          language?: string | null
+          model?: string | null
+          project_id: string
+          provider?: string | null
+          requested_language?: string | null
+          segments?: Json
+          source_kind?: string | null
+          source_storage_path?: string | null
+          text?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          detected_language?: string | null
+          duration_seconds?: number | null
+          id?: string
+          job_id?: string | null
+          language?: string | null
+          model?: string | null
+          project_id?: string
+          provider?: string | null
+          requested_language?: string | null
+          segments?: Json
+          source_kind?: string | null
+          source_storage_path?: string | null
+          text?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transcriptions_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "processing_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transcriptions_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
