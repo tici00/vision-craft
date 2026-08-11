@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock, Info, Loader2, ServerCog, XCircle } from "lucide-react";
@@ -13,8 +13,10 @@ import { JobStatusBadge } from "@/components/projects/StatusBadge";
 import { ProcessingSteps } from "@/components/processing/ProcessingSteps";
 import { projectQueries } from "@/services/queries";
 import { videoProcessingService } from "@/services/videoProcessingService";
+import { advanceProcessing, getProcessingCapabilities } from "@/lib/processing.functions";
 import { formatElapsed, formatPercent, formatTimecode } from "@/lib/format";
-import { PROCESSING_STEP_TEMPLATE } from "@/types/video-editor";
+import { ANALYSIS_STAGE_LABEL, PROCESSING_STEP_TEMPLATE } from "@/types/video-editor";
+
 
 export const Route = createFileRoute("/projects/$projectId/processing")({
   head: () => ({
@@ -48,11 +50,39 @@ function ProcessingPage() {
 
   const active = job.data?.status === "queued" || job.data?.status === "running";
 
+  const capabilities = useQuery({
+    queryKey: ["processing", "capabilities"] as const,
+    queryFn: () => getProcessingCapabilities(),
+    staleTime: 60_000,
+  });
+
   useEffect(() => {
     if (!active) return;
     const id = setInterval(() => forceTick((value) => value + 1), 1000);
     return () => clearInterval(id);
   }, [active]);
+
+  /**
+   * Drives the real pipeline: each call executes one server-side stage and
+   * persists what actually happened. No progress is simulated here.
+   */
+  const advancing = useRef(false);
+  useEffect(() => {
+    const jobId = job.data?.id;
+    if (!jobId || !active || job.data?.cancelRequested) return;
+    if (advancing.current) return;
+    advancing.current = true;
+    void advanceProcessing({ data: { jobId } })
+      .then(() => {
+        void job.refetch();
+        void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      })
+      .catch((error: Error) => toast.error(error.message))
+      .finally(() => {
+        advancing.current = false;
+      });
+  }, [job.data?.id, job.data?.stage, job.data?.status, active, job.data?.cancelRequested]);
+
 
   useEffect(() => {
     if (job.data?.status === "completed") {
