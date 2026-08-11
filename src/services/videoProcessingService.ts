@@ -128,6 +128,8 @@ function mapJob(row: Row): ProcessingJob {
     estimatedSecondsRemaining: row.estimated_seconds_remaining,
     cancelRequested: row.cancel_requested,
     errorMessage: row.error_message,
+    stageMessage: row.stage_message ?? null,
+
   };
 }
 

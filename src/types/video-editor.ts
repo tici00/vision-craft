@@ -185,7 +185,10 @@ export interface ProcessingJob {
   estimatedSecondsRemaining: number | null;
   cancelRequested: boolean;
   errorMessage: string | null;
+  /** Human-readable description of what the last executed stage really did. */
+  stageMessage: string | null;
 }
+
 
 /** Multi-signal relevance scores produced by the future analysis pipeline. */
 export interface SegmentScores {
