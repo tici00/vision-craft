@@ -725,14 +725,33 @@ export async function advanceJob(jobId: string): Promise<JobSnapshot> {
   return snapshot(job);
 }
 
-/** Which real capabilities are currently connected. */
-export function getCapabilities() {
-  const worker = getMediaWorkerConfig();
+/** Which real capabilities are currently connected (verified, not assumed). */
+export async function getCapabilities() {
+  const worker = getWorkerConfig();
+  let workerHealthy = false;
+  let workerFfmpeg: string | null = null;
+  let workerError: string | null = null;
+
+  if (worker) {
+    try {
+      const health = await checkWorkerHealth();
+      workerHealthy = health.ok;
+      workerFfmpeg = health.ffmpeg;
+    } catch (error) {
+      workerError = error instanceof Error ? error.message : "Serviço de mídia inacessível.";
+    }
+  }
+
   return {
     aiConfigured: Boolean(process.env["LOVABLE_API_KEY"]),
     mediaWorkerConfigured: Boolean(worker),
+    workerHealthy,
+    workerFfmpeg,
+    workerError,
+    workerAuthenticated: Boolean(worker?.token),
     directMediaLimitBytes: DIRECT_MEDIA_LIMIT_BYTES,
-    mediaWorkerSetupMessage: MEDIA_WORKER_SETUP_MESSAGE,
-    renderWorkerSetupMessage: RENDER_WORKER_SETUP_MESSAGE,
+    mediaWorkerSetupMessage: WORKER_SETUP_MESSAGE,
+    renderWorkerSetupMessage: workerError ?? WORKER_SETUP_MESSAGE,
   };
 }
+
