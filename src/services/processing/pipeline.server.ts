@@ -539,7 +539,8 @@ async function runPreparingOutputs(job: Row): Promise<Row> {
 }
 
 async function runRendering(job: Row): Promise<Row> {
-  const worker = getMediaWorkerConfig();
+  if (!isWorkerConfigured()) throw new Error(WORKER_SETUP_MESSAGE);
+
   const { data: clips } = await supabaseAdmin
     .from("short_clips")
     .select("*")
@@ -548,19 +549,34 @@ async function runRendering(job: Row): Promise<Row> {
 
   if (!clips?.length) throw new Error("Nenhum corte encontrado para renderizar.");
 
-  if (!worker) {
+  const pending = clips.filter((clip: Row) => clip.render_status === "pending");
+  const alreadyRendered = clips.filter((clip: Row) => clip.render_status === "rendered").length;
+
+  if (pending.length === 0) {
+    if (alreadyRendered === 0) {
+      throw new Error(
+        "O serviço de mídia não conseguiu gerar nenhum arquivo de corte. Verifique os logs do serviço de mídia.",
+      );
+    }
     await supabaseAdmin
-      .from("short_clips")
-      .update({ render_status: "awaiting_worker", render_error: RENDER_WORKER_SETUP_MESSAGE })
-      .eq("project_id", job.project_id);
-    throw new Error(RENDER_WORKER_SETUP_MESSAGE);
+      .from("processing_usage")
+      .update({ rendered_clips: alreadyRendered })
+      .eq("job_id", job.id);
+    return moveTo(job, "completed", {
+      steps: { rendering: "done" },
+      message: `${alreadyRendered} arquivo(s) de corte gerado(s) pelo serviço de mídia.`,
+    });
   }
 
-  const request = await requestPayload(job);
-  const sourceUrl = await createSignedSourceUrl(request.sourceVideo.storagePath!, 6 * 3600);
+  await checkWorkerHealth();
 
+  const request = await requestPayload(job);
+  const sourceUrl = await createSignedSourceUrl(request.sourceVideo.storagePath!, 12 * 3600);
+
+  // Rendered in batches so multi-hour sources report real, incremental progress.
+  const batch = pending.slice(0, RENDER_BATCH_SIZE);
   const targets: RenderClipRequest[] = [];
-  for (const clip of clips) {
+  for (const clip of batch) {
     const upload = await createClipUploadUrl(`${job.project_id}/${clip.id}.mp4`);
     targets.push({
       id: clip.id,
@@ -572,10 +588,11 @@ async function runRendering(job: Row): Promise<Row> {
     });
   }
 
-  const results = await requestClipRender({
+  const results = await renderClips({
     jobId: job.id,
     projectId: job.project_id,
     sourceUrl,
+    bucket: CLIPS_BUCKET,
     clips: targets,
   });
 
@@ -600,28 +617,50 @@ async function runRendering(job: Row): Promise<Row> {
         ...(result.thumbnailPath ? { thumbnail_url: result.thumbnailPath } : {}),
       })
       .eq("id", result.id);
-    await supabaseAdmin
-      .from("clip_candidates")
-      .update({ status: "rendered" })
-      .eq("id", (clips.find((clip) => clip.id === result.id) ?? {}).candidate_id ?? "");
+    const candidateId = clips.find((clip: Row) => clip.id === result.id)?.candidate_id;
+    if (candidateId) {
+      await supabaseAdmin
+        .from("clip_candidates")
+        .update({ status: "rendered" })
+        .eq("id", candidateId);
+    }
   }
 
-  if (rendered === 0) {
-    throw new Error(
-      "O serviço de mídia não conseguiu gerar nenhum arquivo de corte. Verifique os logs do serviço.",
-    );
-  }
+  const totalRendered = alreadyRendered + rendered;
+  const remaining = pending.length - batch.length;
 
   await supabaseAdmin
     .from("processing_usage")
-    .update({ rendered_clips: rendered })
+    .update({ rendered_clips: totalRendered })
     .eq("job_id", job.id);
+
+  if (remaining > 0) {
+    // Stays on the rendering stage: the next advance call renders the next batch.
+    const progress = 92 + Math.round((totalRendered / clips.length) * 6);
+    return updateJob(job.id, {
+      stage: "rendering",
+      status: "running",
+      progress: Math.min(98, progress),
+      current_step: "Gerando os arquivos dos cortes",
+      stage_message: `${totalRendered} de ${clips.length} corte(s) gerado(s) pelo serviço de mídia.`,
+      worker_stage: "rendering",
+      worker_last_sync_at: new Date().toISOString(),
+      logs: await appendLog(job, `Lote renderizado: ${totalRendered}/${clips.length}.`),
+    });
+  }
+
+  if (totalRendered === 0) {
+    throw new Error(
+      "O serviço de mídia não conseguiu gerar nenhum arquivo de corte. Verifique os logs do serviço de mídia.",
+    );
+  }
 
   return moveTo(job, "completed", {
     steps: { rendering: "done" },
-    message: `${rendered} arquivo(s) de corte gerado(s) em ${CLIPS_BUCKET}.`,
+    message: `${totalRendered} arquivo(s) de corte gerado(s) em ${CLIPS_BUCKET}.`,
   });
 }
+
 
 /* --------------------------------------------------------------- public API */
 
