@@ -32,7 +32,6 @@ import {
   type VideoSegment,
 } from "@/types/video-editor";
 
-
 /**
  * videoProcessingService — the single boundary between the UI and persistence /
  * future processing infrastructure.
@@ -129,7 +128,6 @@ function mapJob(row: Row): ProcessingJob {
     cancelRequested: row.cancel_requested,
     errorMessage: row.error_message,
     stageMessage: row.stage_message ?? null,
-
   };
 }
 
@@ -158,7 +156,6 @@ function mapSegment(row: Row): VideoSegment {
     analysisSources: (row.analysis_sources ?? []) as AnalysisSource[],
   };
 }
-
 
 function mapClip(row: Row): ShortClip {
   return {
@@ -259,7 +256,6 @@ export interface SaveConfigurationInput {
   preserveWebcamReactions: boolean;
   preserveContextLevel: ContextLevel;
 }
-
 
 export const videoProcessingService = {
   /* ------------------------------------------------------------- projects */
@@ -470,7 +466,11 @@ export const videoProcessingService = {
       this.getConfiguration(projectId),
     ]);
     if (!configuration) throw new Error("Configure a análise antes de enviar para processamento.");
-    if (!configuration.wantShortClips && !configuration.wantHighlights && !configuration.wantLongEdit) {
+    if (
+      !configuration.wantShortClips &&
+      !configuration.wantHighlights &&
+      !configuration.wantLongEdit
+    ) {
       throw new Error("Selecione ao menos um resultado antes de enviar para processamento.");
     }
     if (!project.sourceStoragePath) {
@@ -522,7 +522,6 @@ export const videoProcessingService = {
     ]);
     return configuration ? buildAnalysisJobRequest(project, configuration) : null;
   },
-
 
   async getJobStatus(jobId: string): Promise<ProcessingJob> {
     const { data, error } = await supabase

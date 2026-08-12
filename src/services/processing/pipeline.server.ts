@@ -34,7 +34,6 @@ import {
 } from "@/services/worker/workerClient.server";
 import { transcribeAudioChunks, transcribeDirectSource } from "./transcription.server";
 
-
 /* -------------------------------------------------------------------- types */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -80,9 +79,7 @@ function withSteps(
   steps: ProcessingStep[],
   updates: Record<string, ProcessingStep["status"]>,
 ): ProcessingStep[] {
-  return steps.map((step) =>
-    updates[step.key] ? { ...step, status: updates[step.key]! } : step,
-  );
+  return steps.map((step) => (updates[step.key] ? { ...step, status: updates[step.key]! } : step));
 }
 
 async function loadJob(jobId: string): Promise<Row> {
@@ -153,7 +150,8 @@ async function moveTo(
       analysis_stage: stage,
       analysis_progress: progress,
       analysis_error: null,
-      status: stage === "completed" ? "completed" : stage === "rendering" ? "rendering" : "analyzing",
+      status:
+        stage === "completed" ? "completed" : stage === "rendering" ? "rendering" : "analyzing",
       ...(stage === "completed" ? { analysis_completed_at: new Date().toISOString() } : {}),
     })
     .eq("id", job.project_id);
@@ -217,7 +215,7 @@ async function requestPayload(job: Row): Promise<AnalysisJobRequest> {
       durationSeconds: project.duration_seconds == null ? null : Number(project.duration_seconds),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     {
       ...configuration,
       wantShortClips: configuration.want_short_clips,
@@ -351,7 +349,6 @@ async function runExtractingAudio(job: Row): Promise<Row> {
   });
 }
 
-
 async function runTranscribing(job: Row): Promise<Row> {
   const payload = (await requestPayload(job)) as AnalysisJobRequest & {
     audioChunks?: Parameters<typeof transcribeAudioChunks>[0]["chunks"];
@@ -481,7 +478,6 @@ async function runScoringSegments(job: Row): Promise<Row> {
     )
     .select("*");
   if (error) throw new Error(error.message);
-
 
   await supabaseAdmin.from("video_segments").delete().eq("project_id", job.project_id);
   await supabaseAdmin.from("video_segments").insert(
@@ -675,7 +671,6 @@ async function runRendering(job: Row): Promise<Row> {
   });
 }
 
-
 /* --------------------------------------------------------------- public API */
 
 /** Runs the next pending stage of a job and returns the persisted state. */
@@ -768,4 +763,3 @@ export async function getCapabilities() {
     renderWorkerSetupMessage: workerError ?? WORKER_SETUP_MESSAGE,
   };
 }
-

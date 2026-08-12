@@ -148,7 +148,11 @@ export async function workerRequest<T>(
       try {
         return JSON.parse(text) as T;
       } catch {
-        throw new WorkerError(response.status, path, `Resposta inválida do serviço de mídia em ${path}.`);
+        throw new WorkerError(
+          response.status,
+          path,
+          `Resposta inválida do serviço de mídia em ${path}.`,
+        );
       }
     } catch (error) {
       if (error instanceof WorkerError) throw error;

@@ -130,8 +130,7 @@ export async function selectShortClipCandidates(params: {
       criteria: Array.isArray(item.criteria) ? item.criteria.filter(Boolean).slice(0, 6) : [],
       topic: item.topic?.trim() || null,
       hasSpeech: item.hasSpeech ?? true,
-      score:
-        item.score == null ? null : Math.max(0, Math.min(1, Number(item.score))) || null,
+      score: item.score == null ? null : Math.max(0, Math.min(1, Number(item.score))) || null,
     });
   }
 
@@ -142,7 +141,8 @@ export async function selectShortClipCandidates(params: {
         .slice(0, index)
         .every(
           (other) =>
-            candidate.startSeconds >= other.endSeconds || candidate.endSeconds <= other.startSeconds,
+            candidate.startSeconds >= other.endSeconds ||
+            candidate.endSeconds <= other.startSeconds,
         ),
     );
 
