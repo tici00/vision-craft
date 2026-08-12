@@ -277,19 +277,38 @@ async function runPreparing(job: Row): Promise<Row> {
   }
 
   const size = (await getSourceObjectSize(storagePath)) ?? request.sourceVideo.sizeBytes ?? null;
-  const worker = getMediaWorkerConfig();
-  const needsWorker = size == null || size > DIRECT_MEDIA_LIMIT_BYTES;
-  if (needsWorker && !worker) {
-    throw new Error(MEDIA_WORKER_SETUP_MESSAGE);
+  const workerConfigured = isWorkerConfigured();
+
+  // The worker is the real path for any duration. Direct inline analysis is only
+  // a fallback for small files when no worker is reachable.
+  let message: string;
+  if (workerConfigured) {
+    const health = await checkWorkerHealth();
+    message = `Serviço de mídia disponível (${health.ffmpeg?.split(" ").slice(0, 3).join(" ")}). O áudio será extraído no servidor.`;
+  } else if (size != null && size <= DIRECT_MEDIA_LIMIT_BYTES) {
+    message =
+      "Serviço de mídia não configurado: este arquivo é pequeno e será analisado diretamente pelo modelo.";
+  } else {
+    throw new Error(WORKER_SETUP_MESSAGE);
   }
 
-  const message = needsWorker
-    ? "Vídeo longo: o áudio será extraído pelo serviço de mídia conectado."
-    : "Vídeo curto: o áudio original será analisado diretamente, sem extração externa.";
+  const requestedOutputs = [
+    ...(request.outputs.shortClips.enabled ? ["short_clips"] : []),
+    ...(request.outputs.highlights.enabled ? ["highlights"] : []),
+    ...(request.outputs.longEdit.enabled ? ["long_edit"] : []),
+  ];
 
   await supabaseAdmin
     .from("processing_jobs")
-    .update({ request_payload: request as unknown as Row })
+    .update({
+      request_payload: request as unknown as Row,
+      // Snapshot of the exact configuration used, so results stay auditable.
+      configuration_snapshot: request as unknown as Row,
+      requested_outputs: requestedOutputs,
+      worker_stage: workerConfigured ? "ready" : "not_configured",
+      worker_last_sync_at: new Date().toISOString(),
+      attempt_count: Number(job.attempt_count ?? 0) + 1,
+    })
     .eq("id", job.id);
 
   return moveTo(job, "extracting_audio", { steps: { prepare: "done" }, message });
@@ -299,19 +318,18 @@ async function runExtractingAudio(job: Row): Promise<Row> {
   const request = await requestPayload(job);
   const storagePath = request.sourceVideo.storagePath!;
   const size = (await getSourceObjectSize(storagePath)) ?? request.sourceVideo.sizeBytes ?? null;
-  const worker = getMediaWorkerConfig();
-  const needsWorker = size == null || size > DIRECT_MEDIA_LIMIT_BYTES;
 
-  if (!needsWorker) {
+  if (!isWorkerConfigured()) {
+    if (size == null || size > DIRECT_MEDIA_LIMIT_BYTES) throw new Error(WORKER_SETUP_MESSAGE);
     return moveTo(job, "transcribing", {
       steps: { extracting_audio: "skipped" },
-      message: "Extração externa não necessária para este arquivo.",
+      message: "Sem serviço de mídia: o áudio original do arquivo será analisado diretamente.",
     });
   }
-  if (!worker) throw new Error(MEDIA_WORKER_SETUP_MESSAGE);
 
-  const sourceUrl = await createSignedSourceUrl(storagePath, 6 * 3600);
-  const chunks = await requestAudioChunks({
+  // Signed for long enough to cover multi-hour sources.
+  const sourceUrl = await createSignedSourceUrl(storagePath, 12 * 3600);
+  const { chunks, durationSeconds } = await extractAudio({
     jobId: job.id,
     projectId: job.project_id,
     sourceUrl,
@@ -320,13 +338,19 @@ async function runExtractingAudio(job: Row): Promise<Row> {
   await updateJob(job.id, {
     // Chunk descriptors are kept on the job so transcription can resume.
     request_payload: { ...request, audioChunks: chunks } as unknown as Row,
+    worker_stage: "audio_extracted",
+    worker_last_sync_at: new Date().toISOString(),
+    worker_payload: { chunks, durationSeconds } as unknown as Row,
   });
 
   return moveTo(job, "transcribing", {
     steps: { extracting_audio: "done" },
-    message: `${chunks.length} trecho(s) de áudio extraído(s) pelo serviço de mídia.`,
+    message: `Áudio extraído pelo serviço de mídia em ${chunks.length} trecho(s) interno(s)${
+      durationSeconds ? ` · ${Math.round(durationSeconds / 60)} min de mídia` : ""
+    }.`,
   });
 }
+
 
 async function runTranscribing(job: Row): Promise<Row> {
   const payload = (await requestPayload(job)) as AnalysisJobRequest & {
