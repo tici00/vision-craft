@@ -459,9 +459,10 @@ export const videoProcessingService = {
   /* ----------------------------------------------------------------- jobs */
 
   /**
-   * Enqueues a real job record carrying the full structured request. No worker
-   * is connected yet, so the job stays `queued` / `waiting_for_worker` until a
-   * real pipeline claims it — progress is never simulated.
+   * Enqueues a real job record carrying the full structured request plus a
+   * snapshot of the configuration used, so the run stays reproducible and
+   * auditable. The real pipeline picks it up and advances it stage by stage —
+   * progress is never simulated.
    */
   async createProcessingJob(projectId: string): Promise<ProcessingJob> {
     const [project, configuration] = await Promise.all([
@@ -477,6 +478,11 @@ export const videoProcessingService = {
     }
 
     const request = buildAnalysisJobRequest(project, configuration);
+    const requestedOutputs = [
+      ...(configuration.wantShortClips ? ["short_clips"] : []),
+      ...(configuration.wantHighlights ? ["highlights"] : []),
+      ...(configuration.wantLongEdit ? ["long_edit"] : []),
+    ];
 
     const { data, error } = await supabase
       .from("processing_jobs")
@@ -484,14 +490,17 @@ export const videoProcessingService = {
         project_id: projectId,
         status: "queued",
         stage: "queued",
-        waiting_for_worker: true,
+        waiting_for_worker: false,
         progress: 0,
         current_step: null,
         steps: PROCESSING_STEP_TEMPLATE as unknown as Row,
         request_payload: request as unknown as Row,
+        configuration_snapshot: request as unknown as Row,
+        requested_outputs: requestedOutputs,
       })
       .select("*")
       .single();
+
     await supabase
       .from("projects")
       .update({
