@@ -16,63 +16,132 @@ export type Database = {
     Tables: {
       clip_candidates: {
         Row: {
+          analysis_notes: string | null
+          analysis_sources: string[]
+          clarity_score: number | null
+          comment_potential_score: number | null
           created_at: string
+          creator_affinity_score: number | null
           criteria: string[]
+          curiosity_score: number | null
           description: string | null
           duration_seconds: number
+          emotion_score: number | null
           end_seconds: number
+          evaluated_at: string | null
+          evaluation_model: string | null
+          evaluations: Json
           has_speech: boolean | null
+          hook_score: number | null
           id: string
           job_id: string | null
+          keywords: string[]
           order_index: number
+          originality_score: number | null
+          overall_potential_score: number | null
+          pacing_score: number | null
+          payoff_score: number | null
           project_id: string
+          quality_score: number | null
+          reach_expansion_score: number | null
           reason: string | null
+          relevance_score: number | null
+          replay_score: number | null
+          retention_score: number | null
           score: number | null
+          shareability_score: number | null
           start_seconds: number
           status: string
           status_message: string | null
           title: string
           topic: string | null
+          transcript_excerpt: string | null
           updated_at: string
         }
         Insert: {
+          analysis_notes?: string | null
+          analysis_sources?: string[]
+          clarity_score?: number | null
+          comment_potential_score?: number | null
           created_at?: string
+          creator_affinity_score?: number | null
           criteria?: string[]
+          curiosity_score?: number | null
           description?: string | null
           duration_seconds: number
+          emotion_score?: number | null
           end_seconds: number
+          evaluated_at?: string | null
+          evaluation_model?: string | null
+          evaluations?: Json
           has_speech?: boolean | null
+          hook_score?: number | null
           id?: string
           job_id?: string | null
+          keywords?: string[]
           order_index?: number
+          originality_score?: number | null
+          overall_potential_score?: number | null
+          pacing_score?: number | null
+          payoff_score?: number | null
           project_id: string
+          quality_score?: number | null
+          reach_expansion_score?: number | null
           reason?: string | null
+          relevance_score?: number | null
+          replay_score?: number | null
+          retention_score?: number | null
           score?: number | null
+          shareability_score?: number | null
           start_seconds: number
           status?: string
           status_message?: string | null
           title?: string
           topic?: string | null
+          transcript_excerpt?: string | null
           updated_at?: string
         }
         Update: {
+          analysis_notes?: string | null
+          analysis_sources?: string[]
+          clarity_score?: number | null
+          comment_potential_score?: number | null
           created_at?: string
+          creator_affinity_score?: number | null
           criteria?: string[]
+          curiosity_score?: number | null
           description?: string | null
           duration_seconds?: number
+          emotion_score?: number | null
           end_seconds?: number
+          evaluated_at?: string | null
+          evaluation_model?: string | null
+          evaluations?: Json
           has_speech?: boolean | null
+          hook_score?: number | null
           id?: string
           job_id?: string | null
+          keywords?: string[]
           order_index?: number
+          originality_score?: number | null
+          overall_potential_score?: number | null
+          pacing_score?: number | null
+          payoff_score?: number | null
           project_id?: string
+          quality_score?: number | null
+          reach_expansion_score?: number | null
           reason?: string | null
+          relevance_score?: number | null
+          replay_score?: number | null
+          retention_score?: number | null
           score?: number | null
+          shareability_score?: number | null
           start_seconds?: number
           status?: string
           status_message?: string | null
           title?: string
           topic?: string | null
+          transcript_excerpt?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -311,7 +380,9 @@ export type Database = {
       }
       processing_jobs: {
         Row: {
+          attempt_count: number
           cancel_requested: boolean
+          configuration_snapshot: Json | null
           created_at: string
           current_step: string | null
           error_message: string | null
@@ -325,16 +396,24 @@ export type Database = {
           project_id: string
           queued_at: string
           request_payload: Json | null
+          requested_outputs: string[]
           stage: Database["public"]["Enums"]["analysis_stage"]
           stage_message: string | null
+          stage_started_at: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["job_status"]
           steps: Json
           updated_at: string
           waiting_for_worker: boolean
+          worker_last_sync_at: string | null
+          worker_payload: Json | null
+          worker_stage: string | null
+          worker_task_id: string | null
         }
         Insert: {
+          attempt_count?: number
           cancel_requested?: boolean
+          configuration_snapshot?: Json | null
           created_at?: string
           current_step?: string | null
           error_message?: string | null
@@ -348,16 +427,24 @@ export type Database = {
           project_id: string
           queued_at?: string
           request_payload?: Json | null
+          requested_outputs?: string[]
           stage?: Database["public"]["Enums"]["analysis_stage"]
           stage_message?: string | null
+          stage_started_at?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["job_status"]
           steps?: Json
           updated_at?: string
           waiting_for_worker?: boolean
+          worker_last_sync_at?: string | null
+          worker_payload?: Json | null
+          worker_stage?: string | null
+          worker_task_id?: string | null
         }
         Update: {
+          attempt_count?: number
           cancel_requested?: boolean
+          configuration_snapshot?: Json | null
           created_at?: string
           current_step?: string | null
           error_message?: string | null
@@ -371,13 +458,19 @@ export type Database = {
           project_id?: string
           queued_at?: string
           request_payload?: Json | null
+          requested_outputs?: string[]
           stage?: Database["public"]["Enums"]["analysis_stage"]
           stage_message?: string | null
+          stage_started_at?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["job_status"]
           steps?: Json
           updated_at?: string
           waiting_for_worker?: boolean
+          worker_last_sync_at?: string | null
+          worker_payload?: Json | null
+          worker_stage?: string | null
+          worker_task_id?: string | null
         }
         Relationships: [
           {
@@ -397,7 +490,9 @@ export type Database = {
           project_id: string | null
           rendered_clips: number | null
           source_duration_seconds: number | null
+          stage_details: Json
           transcribed_seconds: number | null
+          worker_seconds: number | null
         }
         Insert: {
           created_at?: string
@@ -406,7 +501,9 @@ export type Database = {
           project_id?: string | null
           rendered_clips?: number | null
           source_duration_seconds?: number | null
+          stage_details?: Json
           transcribed_seconds?: number | null
+          worker_seconds?: number | null
         }
         Update: {
           created_at?: string
@@ -415,7 +512,9 @@ export type Database = {
           project_id?: string | null
           rendered_clips?: number | null
           source_duration_seconds?: number | null
+          stage_details?: Json
           transcribed_seconds?: number | null
+          worker_seconds?: number | null
         }
         Relationships: [
           {
@@ -526,18 +625,30 @@ export type Database = {
       }
       short_clips: {
         Row: {
+          actual_result: Json
           candidate_id: string | null
           category: string | null
           confidence: number | null
           created_at: string
           criteria: string[]
           duration_seconds: number
+          feedback: Json
           file_size_bytes: number | null
           id: string
           job_id: string | null
           kept: boolean
+          metrics: Json
+          metrics_updated_at: string | null
           order_index: number
+          performance: Json
+          platform: string | null
+          predicted_performance: Json
           project_id: string
+          publication_caption: string | null
+          publication_hashtags: string[]
+          publication_url: string | null
+          published: boolean
+          published_at: string | null
           reason: string | null
           render_error: string | null
           render_status: string
@@ -550,18 +661,30 @@ export type Database = {
           video_url: string | null
         }
         Insert: {
+          actual_result?: Json
           candidate_id?: string | null
           category?: string | null
           confidence?: number | null
           created_at?: string
           criteria?: string[]
           duration_seconds: number
+          feedback?: Json
           file_size_bytes?: number | null
           id?: string
           job_id?: string | null
           kept?: boolean
+          metrics?: Json
+          metrics_updated_at?: string | null
           order_index?: number
+          performance?: Json
+          platform?: string | null
+          predicted_performance?: Json
           project_id: string
+          publication_caption?: string | null
+          publication_hashtags?: string[]
+          publication_url?: string | null
+          published?: boolean
+          published_at?: string | null
           reason?: string | null
           render_error?: string | null
           render_status?: string
@@ -574,18 +697,30 @@ export type Database = {
           video_url?: string | null
         }
         Update: {
+          actual_result?: Json
           candidate_id?: string | null
           category?: string | null
           confidence?: number | null
           created_at?: string
           criteria?: string[]
           duration_seconds?: number
+          feedback?: Json
           file_size_bytes?: number | null
           id?: string
           job_id?: string | null
           kept?: boolean
+          metrics?: Json
+          metrics_updated_at?: string | null
           order_index?: number
+          performance?: Json
+          platform?: string | null
+          predicted_performance?: Json
           project_id?: string
+          publication_caption?: string | null
+          publication_hashtags?: string[]
+          publication_url?: string | null
+          published?: boolean
+          published_at?: string | null
           reason?: string | null
           render_error?: string | null
           render_status?: string
