@@ -17,18 +17,23 @@ import { selectShortClipCandidates } from "./clipSelection.server";
 import {
   CLIPS_BUCKET,
   DIRECT_MEDIA_LIMIT_BYTES,
-  MEDIA_WORKER_SETUP_MESSAGE,
-  RENDER_WORKER_SETUP_MESSAGE,
   createClipUploadUrl,
   createSignedSourceUrl,
   formatForFile,
-  getMediaWorkerConfig,
   getSourceObjectSize,
-  requestAudioChunks,
-  requestClipRender,
-  type RenderClipRequest,
 } from "./media.server";
+import {
+  RENDER_BATCH_SIZE,
+  WORKER_SETUP_MESSAGE,
+  checkWorkerHealth,
+  extractAudio,
+  getWorkerConfig,
+  isWorkerConfigured,
+  renderClips,
+  type RenderClipRequest,
+} from "@/services/worker/workerClient.server";
 import { transcribeAudioChunks, transcribeDirectSource } from "./transcription.server";
+
 
 /* -------------------------------------------------------------------- types */
 
