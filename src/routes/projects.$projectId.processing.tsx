@@ -259,19 +259,22 @@ function ProcessingPage() {
               <div className="rounded-xl border border-info/30 bg-info/8 p-5">
                 <div className="flex items-center gap-2 text-sm font-medium text-info">
                   <Info className="size-4" />
-                  {capabilities.data?.mediaWorkerConfigured
-                    ? "Pipeline real conectado"
-                    : "Renderização externa pendente"}
+                  {capabilities.data?.workerHealthy
+                    ? "Serviço de mídia conectado"
+                    : capabilities.data?.mediaWorkerConfigured
+                      ? "Serviço de mídia indisponível"
+                      : "Serviço de mídia não configurado"}
                 </div>
                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                   {job.data.stageMessage ?? ANALYSIS_STAGE_LABEL[job.data.stage]}
                 </p>
-                {!capabilities.data?.mediaWorkerConfigured && (
+                {!capabilities.data?.workerHealthy && (
                   <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
                     {capabilities.data?.renderWorkerSetupMessage}
                   </p>
                 )}
               </div>
+
 
 
               <div className="panel p-6">
