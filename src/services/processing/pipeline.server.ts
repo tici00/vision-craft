@@ -446,6 +446,14 @@ async function runScoringSegments(job: Row): Promise<Row> {
     );
   }
 
+  /** Real transcript text inside the candidate range — the base for future evaluations. */
+  const excerptFor = (startSeconds: number, endSeconds: number): string =>
+    transcript
+      .filter((segment) => segment.endSeconds > startSeconds && segment.startSeconds < endSeconds)
+      .map((segment) => segment.text)
+      .join(" ")
+      .slice(0, 4000);
+
   await supabaseAdmin.from("clip_candidates").delete().eq("project_id", job.project_id);
   const { data: inserted, error } = await supabaseAdmin
     .from("clip_candidates")
@@ -462,12 +470,18 @@ async function runScoringSegments(job: Row): Promise<Row> {
         topic: candidate.topic,
         has_speech: candidate.hasSpeech,
         score: candidate.score,
+        relevance_score: candidate.score,
+        transcript_excerpt: excerptFor(candidate.startSeconds, candidate.endSeconds),
+        analysis_sources: ["transcript", "context"],
+        // Structured slot for future intelligence layers (hook, retenção, payoff…).
+        evaluations: {},
         order_index: index,
         status: "selected",
       })),
     )
     .select("*");
   if (error) throw new Error(error.message);
+
 
   await supabaseAdmin.from("video_segments").delete().eq("project_id", job.project_id);
   await supabaseAdmin.from("video_segments").insert(
