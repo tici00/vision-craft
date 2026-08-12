@@ -17,17 +17,21 @@ import { selectShortClipCandidates } from "./clipSelection.server";
 import {
   CLIPS_BUCKET,
   DIRECT_MEDIA_LIMIT_BYTES,
-  MEDIA_WORKER_SETUP_MESSAGE,
-  RENDER_WORKER_SETUP_MESSAGE,
   createClipUploadUrl,
   createSignedSourceUrl,
   formatForFile,
-  getMediaWorkerConfig,
   getSourceObjectSize,
-  requestAudioChunks,
-  requestClipRender,
-  type RenderClipRequest,
 } from "./media.server";
+import {
+  RENDER_BATCH_SIZE,
+  WORKER_SETUP_MESSAGE,
+  checkWorkerHealth,
+  extractAudio,
+  getWorkerConfig,
+  isWorkerConfigured,
+  renderClips,
+  type RenderClipRequest,
+} from "@/services/worker/workerClient.server";
 import { transcribeAudioChunks, transcribeDirectSource } from "./transcription.server";
 
 /* -------------------------------------------------------------------- types */
@@ -75,9 +79,7 @@ function withSteps(
   steps: ProcessingStep[],
   updates: Record<string, ProcessingStep["status"]>,
 ): ProcessingStep[] {
-  return steps.map((step) =>
-    updates[step.key] ? { ...step, status: updates[step.key]! } : step,
-  );
+  return steps.map((step) => (updates[step.key] ? { ...step, status: updates[step.key]! } : step));
 }
 
 async function loadJob(jobId: string): Promise<Row> {
@@ -148,7 +150,8 @@ async function moveTo(
       analysis_stage: stage,
       analysis_progress: progress,
       analysis_error: null,
-      status: stage === "completed" ? "completed" : stage === "rendering" ? "rendering" : "analyzing",
+      status:
+        stage === "completed" ? "completed" : stage === "rendering" ? "rendering" : "analyzing",
       ...(stage === "completed" ? { analysis_completed_at: new Date().toISOString() } : {}),
     })
     .eq("id", job.project_id);
@@ -212,7 +215,7 @@ async function requestPayload(job: Row): Promise<AnalysisJobRequest> {
       durationSeconds: project.duration_seconds == null ? null : Number(project.duration_seconds),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     {
       ...configuration,
       wantShortClips: configuration.want_short_clips,
@@ -272,19 +275,38 @@ async function runPreparing(job: Row): Promise<Row> {
   }
 
   const size = (await getSourceObjectSize(storagePath)) ?? request.sourceVideo.sizeBytes ?? null;
-  const worker = getMediaWorkerConfig();
-  const needsWorker = size == null || size > DIRECT_MEDIA_LIMIT_BYTES;
-  if (needsWorker && !worker) {
-    throw new Error(MEDIA_WORKER_SETUP_MESSAGE);
+  const workerConfigured = isWorkerConfigured();
+
+  // The worker is the real path for any duration. Direct inline analysis is only
+  // a fallback for small files when no worker is reachable.
+  let message: string;
+  if (workerConfigured) {
+    const health = await checkWorkerHealth();
+    message = `Serviço de mídia disponível (${health.ffmpeg?.split(" ").slice(0, 3).join(" ")}). O áudio será extraído no servidor.`;
+  } else if (size != null && size <= DIRECT_MEDIA_LIMIT_BYTES) {
+    message =
+      "Serviço de mídia não configurado: este arquivo é pequeno e será analisado diretamente pelo modelo.";
+  } else {
+    throw new Error(WORKER_SETUP_MESSAGE);
   }
 
-  const message = needsWorker
-    ? "Vídeo longo: o áudio será extraído pelo serviço de mídia conectado."
-    : "Vídeo curto: o áudio original será analisado diretamente, sem extração externa.";
+  const requestedOutputs = [
+    ...(request.outputs.shortClips.enabled ? ["short_clips"] : []),
+    ...(request.outputs.highlights.enabled ? ["highlights"] : []),
+    ...(request.outputs.longEdit.enabled ? ["long_edit"] : []),
+  ];
 
   await supabaseAdmin
     .from("processing_jobs")
-    .update({ request_payload: request as unknown as Row })
+    .update({
+      request_payload: request as unknown as Row,
+      // Snapshot of the exact configuration used, so results stay auditable.
+      configuration_snapshot: request as unknown as Row,
+      requested_outputs: requestedOutputs,
+      worker_stage: workerConfigured ? "ready" : "not_configured",
+      worker_last_sync_at: new Date().toISOString(),
+      attempt_count: Number(job.attempt_count ?? 0) + 1,
+    })
     .eq("id", job.id);
 
   return moveTo(job, "extracting_audio", { steps: { prepare: "done" }, message });
@@ -294,19 +316,18 @@ async function runExtractingAudio(job: Row): Promise<Row> {
   const request = await requestPayload(job);
   const storagePath = request.sourceVideo.storagePath!;
   const size = (await getSourceObjectSize(storagePath)) ?? request.sourceVideo.sizeBytes ?? null;
-  const worker = getMediaWorkerConfig();
-  const needsWorker = size == null || size > DIRECT_MEDIA_LIMIT_BYTES;
 
-  if (!needsWorker) {
+  if (!isWorkerConfigured()) {
+    if (size == null || size > DIRECT_MEDIA_LIMIT_BYTES) throw new Error(WORKER_SETUP_MESSAGE);
     return moveTo(job, "transcribing", {
       steps: { extracting_audio: "skipped" },
-      message: "Extração externa não necessária para este arquivo.",
+      message: "Sem serviço de mídia: o áudio original do arquivo será analisado diretamente.",
     });
   }
-  if (!worker) throw new Error(MEDIA_WORKER_SETUP_MESSAGE);
 
-  const sourceUrl = await createSignedSourceUrl(storagePath, 6 * 3600);
-  const chunks = await requestAudioChunks({
+  // Signed for long enough to cover multi-hour sources.
+  const sourceUrl = await createSignedSourceUrl(storagePath, 12 * 3600);
+  const { chunks, durationSeconds } = await extractAudio({
     jobId: job.id,
     projectId: job.project_id,
     sourceUrl,
@@ -315,11 +336,16 @@ async function runExtractingAudio(job: Row): Promise<Row> {
   await updateJob(job.id, {
     // Chunk descriptors are kept on the job so transcription can resume.
     request_payload: { ...request, audioChunks: chunks } as unknown as Row,
+    worker_stage: "audio_extracted",
+    worker_last_sync_at: new Date().toISOString(),
+    worker_payload: { chunks, durationSeconds } as unknown as Row,
   });
 
   return moveTo(job, "transcribing", {
     steps: { extracting_audio: "done" },
-    message: `${chunks.length} trecho(s) de áudio extraído(s) pelo serviço de mídia.`,
+    message: `Áudio extraído pelo serviço de mídia em ${chunks.length} trecho(s) interno(s)${
+      durationSeconds ? ` · ${Math.round(durationSeconds / 60)} min de mídia` : ""
+    }.`,
   });
 }
 
@@ -417,6 +443,14 @@ async function runScoringSegments(job: Row): Promise<Row> {
     );
   }
 
+  /** Real transcript text inside the candidate range — the base for future evaluations. */
+  const excerptFor = (startSeconds: number, endSeconds: number): string =>
+    transcript
+      .filter((segment) => segment.endSeconds > startSeconds && segment.startSeconds < endSeconds)
+      .map((segment) => segment.text)
+      .join(" ")
+      .slice(0, 4000);
+
   await supabaseAdmin.from("clip_candidates").delete().eq("project_id", job.project_id);
   const { data: inserted, error } = await supabaseAdmin
     .from("clip_candidates")
@@ -433,6 +467,11 @@ async function runScoringSegments(job: Row): Promise<Row> {
         topic: candidate.topic,
         has_speech: candidate.hasSpeech,
         score: candidate.score,
+        relevance_score: candidate.score,
+        transcript_excerpt: excerptFor(candidate.startSeconds, candidate.endSeconds),
+        analysis_sources: ["transcript", "context"],
+        // Structured slot for future intelligence layers (hook, retenção, payoff…).
+        evaluations: {},
         order_index: index,
         status: "selected",
       })),
@@ -510,7 +549,8 @@ async function runPreparingOutputs(job: Row): Promise<Row> {
 }
 
 async function runRendering(job: Row): Promise<Row> {
-  const worker = getMediaWorkerConfig();
+  if (!isWorkerConfigured()) throw new Error(WORKER_SETUP_MESSAGE);
+
   const { data: clips } = await supabaseAdmin
     .from("short_clips")
     .select("*")
@@ -519,19 +559,34 @@ async function runRendering(job: Row): Promise<Row> {
 
   if (!clips?.length) throw new Error("Nenhum corte encontrado para renderizar.");
 
-  if (!worker) {
+  const pending = clips.filter((clip: Row) => clip.render_status === "pending");
+  const alreadyRendered = clips.filter((clip: Row) => clip.render_status === "rendered").length;
+
+  if (pending.length === 0) {
+    if (alreadyRendered === 0) {
+      throw new Error(
+        "O serviço de mídia não conseguiu gerar nenhum arquivo de corte. Verifique os logs do serviço de mídia.",
+      );
+    }
     await supabaseAdmin
-      .from("short_clips")
-      .update({ render_status: "awaiting_worker", render_error: RENDER_WORKER_SETUP_MESSAGE })
-      .eq("project_id", job.project_id);
-    throw new Error(RENDER_WORKER_SETUP_MESSAGE);
+      .from("processing_usage")
+      .update({ rendered_clips: alreadyRendered })
+      .eq("job_id", job.id);
+    return moveTo(job, "completed", {
+      steps: { rendering: "done" },
+      message: `${alreadyRendered} arquivo(s) de corte gerado(s) pelo serviço de mídia.`,
+    });
   }
 
-  const request = await requestPayload(job);
-  const sourceUrl = await createSignedSourceUrl(request.sourceVideo.storagePath!, 6 * 3600);
+  await checkWorkerHealth();
 
+  const request = await requestPayload(job);
+  const sourceUrl = await createSignedSourceUrl(request.sourceVideo.storagePath!, 12 * 3600);
+
+  // Rendered in batches so multi-hour sources report real, incremental progress.
+  const batch = pending.slice(0, RENDER_BATCH_SIZE);
   const targets: RenderClipRequest[] = [];
-  for (const clip of clips) {
+  for (const clip of batch) {
     const upload = await createClipUploadUrl(`${job.project_id}/${clip.id}.mp4`);
     targets.push({
       id: clip.id,
@@ -543,10 +598,11 @@ async function runRendering(job: Row): Promise<Row> {
     });
   }
 
-  const results = await requestClipRender({
+  const results = await renderClips({
     jobId: job.id,
     projectId: job.project_id,
     sourceUrl,
+    bucket: CLIPS_BUCKET,
     clips: targets,
   });
 
@@ -571,26 +627,47 @@ async function runRendering(job: Row): Promise<Row> {
         ...(result.thumbnailPath ? { thumbnail_url: result.thumbnailPath } : {}),
       })
       .eq("id", result.id);
-    await supabaseAdmin
-      .from("clip_candidates")
-      .update({ status: "rendered" })
-      .eq("id", (clips.find((clip) => clip.id === result.id) ?? {}).candidate_id ?? "");
+    const candidateId = clips.find((clip: Row) => clip.id === result.id)?.candidate_id;
+    if (candidateId) {
+      await supabaseAdmin
+        .from("clip_candidates")
+        .update({ status: "rendered" })
+        .eq("id", candidateId);
+    }
   }
 
-  if (rendered === 0) {
-    throw new Error(
-      "O serviço de mídia não conseguiu gerar nenhum arquivo de corte. Verifique os logs do serviço.",
-    );
-  }
+  const totalRendered = alreadyRendered + rendered;
+  const remaining = pending.length - batch.length;
 
   await supabaseAdmin
     .from("processing_usage")
-    .update({ rendered_clips: rendered })
+    .update({ rendered_clips: totalRendered })
     .eq("job_id", job.id);
+
+  if (remaining > 0) {
+    // Stays on the rendering stage: the next advance call renders the next batch.
+    const progress = 92 + Math.round((totalRendered / clips.length) * 6);
+    return updateJob(job.id, {
+      stage: "rendering",
+      status: "running",
+      progress: Math.min(98, progress),
+      current_step: "Gerando os arquivos dos cortes",
+      stage_message: `${totalRendered} de ${clips.length} corte(s) gerado(s) pelo serviço de mídia.`,
+      worker_stage: "rendering",
+      worker_last_sync_at: new Date().toISOString(),
+      logs: await appendLog(job, `Lote renderizado: ${totalRendered}/${clips.length}.`),
+    });
+  }
+
+  if (totalRendered === 0) {
+    throw new Error(
+      "O serviço de mídia não conseguiu gerar nenhum arquivo de corte. Verifique os logs do serviço de mídia.",
+    );
+  }
 
   return moveTo(job, "completed", {
     steps: { rendering: "done" },
-    message: `${rendered} arquivo(s) de corte gerado(s) em ${CLIPS_BUCKET}.`,
+    message: `${totalRendered} arquivo(s) de corte gerado(s) em ${CLIPS_BUCKET}.`,
   });
 }
 
@@ -657,14 +734,32 @@ export async function advanceJob(jobId: string): Promise<JobSnapshot> {
   return snapshot(job);
 }
 
-/** Which real capabilities are currently connected. */
-export function getCapabilities() {
-  const worker = getMediaWorkerConfig();
+/** Which real capabilities are currently connected (verified, not assumed). */
+export async function getCapabilities() {
+  const worker = getWorkerConfig();
+  let workerHealthy = false;
+  let workerFfmpeg: string | null = null;
+  let workerError: string | null = null;
+
+  if (worker) {
+    try {
+      const health = await checkWorkerHealth();
+      workerHealthy = health.ok;
+      workerFfmpeg = health.ffmpeg;
+    } catch (error) {
+      workerError = error instanceof Error ? error.message : "Serviço de mídia inacessível.";
+    }
+  }
+
   return {
     aiConfigured: Boolean(process.env["LOVABLE_API_KEY"]),
     mediaWorkerConfigured: Boolean(worker),
+    workerHealthy,
+    workerFfmpeg,
+    workerError,
+    workerAuthenticated: Boolean(worker?.token),
     directMediaLimitBytes: DIRECT_MEDIA_LIMIT_BYTES,
-    mediaWorkerSetupMessage: MEDIA_WORKER_SETUP_MESSAGE,
-    renderWorkerSetupMessage: RENDER_WORKER_SETUP_MESSAGE,
+    mediaWorkerSetupMessage: WORKER_SETUP_MESSAGE,
+    renderWorkerSetupMessage: workerError ?? WORKER_SETUP_MESSAGE,
   };
 }

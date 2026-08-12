@@ -17,7 +17,6 @@ import { advanceProcessing, getProcessingCapabilities } from "@/lib/processing.f
 import { formatElapsed, formatPercent, formatTimecode } from "@/lib/format";
 import { ANALYSIS_STAGE_LABEL, PROCESSING_STEP_TEMPLATE } from "@/types/video-editor";
 
-
 export const Route = createFileRoute("/projects/$projectId/processing")({
   head: () => ({
     meta: [
@@ -82,7 +81,6 @@ function ProcessingPage() {
         advancing.current = false;
       });
   }, [job.data?.id, job.data?.stage, job.data?.status, active, job.data?.cancelRequested]);
-
 
   useEffect(() => {
     if (job.data?.status === "completed") {
@@ -161,8 +159,8 @@ function ProcessingPage() {
                       <JobStatusBadge status={job.data.status} />
                     </div>
                     <p className="mt-2 max-w-lg text-sm text-muted-foreground">
-                      You can leave this page — the job keeps its state in the database and this view
-                      updates from the job record.
+                      You can leave this page — the job keeps its state in the database and this
+                      view updates from the job record.
                     </p>
                   </div>
                   <div className="text-right">
@@ -223,7 +221,8 @@ function ProcessingPage() {
                       Cancel processing
                     </Button>
                     <span className="text-xs text-muted-foreground">
-                      Cancellation is recorded on the job so the worker stops at its next checkpoint.
+                      Cancellation is recorded on the job so the worker stops at its next
+                      checkpoint.
                     </span>
                   </div>
                 )}
@@ -249,30 +248,28 @@ function ProcessingPage() {
                       job.data.startedAt ? new Date(job.data.startedAt).toLocaleString() : "Not yet"
                     }
                   />
-                  <Row
-                    label="Cancel requested"
-                    value={job.data.cancelRequested ? "Yes" : "No"}
-                  />
+                  <Row label="Cancel requested" value={job.data.cancelRequested ? "Yes" : "No"} />
                 </dl>
               </div>
 
               <div className="rounded-xl border border-info/30 bg-info/8 p-5">
                 <div className="flex items-center gap-2 text-sm font-medium text-info">
                   <Info className="size-4" />
-                  {capabilities.data?.mediaWorkerConfigured
-                    ? "Pipeline real conectado"
-                    : "Renderização externa pendente"}
+                  {capabilities.data?.workerHealthy
+                    ? "Serviço de mídia conectado"
+                    : capabilities.data?.mediaWorkerConfigured
+                      ? "Serviço de mídia indisponível"
+                      : "Serviço de mídia não configurado"}
                 </div>
                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                   {job.data.stageMessage ?? ANALYSIS_STAGE_LABEL[job.data.stage]}
                 </p>
-                {!capabilities.data?.mediaWorkerConfigured && (
+                {!capabilities.data?.workerHealthy && (
                   <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
                     {capabilities.data?.renderWorkerSetupMessage}
                   </p>
                 )}
               </div>
-
 
               <div className="panel p-6">
                 <div className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -280,8 +277,8 @@ function ProcessingPage() {
                   Keep working
                 </div>
                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                  Jobs run asynchronously. Return to the dashboard and open other projects while this
-                  one waits.
+                  Jobs run asynchronously. Return to the dashboard and open other projects while
+                  this one waits.
                 </p>
               </div>
             </aside>
@@ -292,7 +289,15 @@ function ProcessingPage() {
   );
 }
 
-function Metric({ label, value, hint }: { label: string; value: string; hint?: string | undefined }) {
+function Metric({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string | undefined;
+}) {
   return (
     <div>
       <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{label}</p>

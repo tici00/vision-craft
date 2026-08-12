@@ -32,7 +32,6 @@ import {
   type VideoSegment,
 } from "@/types/video-editor";
 
-
 /**
  * videoProcessingService — the single boundary between the UI and persistence /
  * future processing infrastructure.
@@ -129,7 +128,6 @@ function mapJob(row: Row): ProcessingJob {
     cancelRequested: row.cancel_requested,
     errorMessage: row.error_message,
     stageMessage: row.stage_message ?? null,
-
   };
 }
 
@@ -158,7 +156,6 @@ function mapSegment(row: Row): VideoSegment {
     analysisSources: (row.analysis_sources ?? []) as AnalysisSource[],
   };
 }
-
 
 function mapClip(row: Row): ShortClip {
   return {
@@ -259,7 +256,6 @@ export interface SaveConfigurationInput {
   preserveWebcamReactions: boolean;
   preserveContextLevel: ContextLevel;
 }
-
 
 export const videoProcessingService = {
   /* ------------------------------------------------------------- projects */
@@ -459,9 +455,10 @@ export const videoProcessingService = {
   /* ----------------------------------------------------------------- jobs */
 
   /**
-   * Enqueues a real job record carrying the full structured request. No worker
-   * is connected yet, so the job stays `queued` / `waiting_for_worker` until a
-   * real pipeline claims it — progress is never simulated.
+   * Enqueues a real job record carrying the full structured request plus a
+   * snapshot of the configuration used, so the run stays reproducible and
+   * auditable. The real pipeline picks it up and advances it stage by stage —
+   * progress is never simulated.
    */
   async createProcessingJob(projectId: string): Promise<ProcessingJob> {
     const [project, configuration] = await Promise.all([
@@ -469,7 +466,11 @@ export const videoProcessingService = {
       this.getConfiguration(projectId),
     ]);
     if (!configuration) throw new Error("Configure a análise antes de enviar para processamento.");
-    if (!configuration.wantShortClips && !configuration.wantHighlights && !configuration.wantLongEdit) {
+    if (
+      !configuration.wantShortClips &&
+      !configuration.wantHighlights &&
+      !configuration.wantLongEdit
+    ) {
       throw new Error("Selecione ao menos um resultado antes de enviar para processamento.");
     }
     if (!project.sourceStoragePath) {
@@ -477,6 +478,11 @@ export const videoProcessingService = {
     }
 
     const request = buildAnalysisJobRequest(project, configuration);
+    const requestedOutputs = [
+      ...(configuration.wantShortClips ? ["short_clips"] : []),
+      ...(configuration.wantHighlights ? ["highlights"] : []),
+      ...(configuration.wantLongEdit ? ["long_edit"] : []),
+    ];
 
     const { data, error } = await supabase
       .from("processing_jobs")
@@ -484,14 +490,17 @@ export const videoProcessingService = {
         project_id: projectId,
         status: "queued",
         stage: "queued",
-        waiting_for_worker: true,
+        waiting_for_worker: false,
         progress: 0,
         current_step: null,
         steps: PROCESSING_STEP_TEMPLATE as unknown as Row,
         request_payload: request as unknown as Row,
+        configuration_snapshot: request as unknown as Row,
+        requested_outputs: requestedOutputs,
       })
       .select("*")
       .single();
+
     await supabase
       .from("projects")
       .update({
@@ -513,7 +522,6 @@ export const videoProcessingService = {
     ]);
     return configuration ? buildAnalysisJobRequest(project, configuration) : null;
   },
-
 
   async getJobStatus(jobId: string): Promise<ProcessingJob> {
     const { data, error } = await supabase
