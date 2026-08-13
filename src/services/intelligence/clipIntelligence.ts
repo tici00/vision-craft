@@ -179,7 +179,7 @@ export function clamp01(value: unknown): number | null {
 export function composeClipScore(
   scores: Partial<ClipScores>,
   options: {
-    weights?: Partial<Record<ClipDimensionKey, number>>;
+    weights?: Partial<Record<ClipDimensionKey, number>> | undefined;
     diversityPenalty?: number;
   } = {},
 ): ClipScoreComposition {
