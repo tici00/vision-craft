@@ -52,6 +52,33 @@ export async function createClipUploadUrl(
   return { path: storagePath, uploadUrl: data.signedUrl, token: data.token };
 }
 
+/**
+ * Copies a file the media worker rendered into the clips bucket. The worker only
+ * exposes a temporary URL, so the file must be persisted here to survive.
+ */
+export async function storeClipFromUrl(
+  storagePath: string,
+  downloadUrl: string,
+): Promise<{ path: string; sizeBytes: number }> {
+  const response = await fetch(downloadUrl);
+  if (!response.ok) {
+    throw new Error(
+      `Não foi possível baixar o corte gerado pelo serviço de mídia (${response.status}).`,
+    );
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength === 0) {
+    throw new Error("O serviço de mídia devolveu um arquivo de corte vazio.");
+  }
+  const { error } = await supabaseAdmin.storage.from(CLIPS_BUCKET).upload(storagePath, bytes, {
+    contentType: response.headers.get("content-type") ?? "video/mp4",
+    upsert: true,
+  });
+  if (error) throw new Error(error.message);
+  return { path: storagePath, sizeBytes: bytes.byteLength };
+}
+
+
 export async function getSourceObjectSize(storagePath: string): Promise<number | null> {
   const folder = storagePath.split("/").slice(0, -1).join("/");
   const name = storagePath.split("/").pop();
