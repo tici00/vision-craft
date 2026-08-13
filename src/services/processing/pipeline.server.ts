@@ -17,11 +17,12 @@ import { selectShortClipCandidates } from "./clipSelection.server";
 import {
   CLIPS_BUCKET,
   DIRECT_MEDIA_LIMIT_BYTES,
-  createClipUploadUrl,
   createSignedSourceUrl,
   formatForFile,
   getSourceObjectSize,
+  storeClipFromUrl,
 } from "./media.server";
+
 import {
   RENDER_BATCH_SIZE,
   WORKER_SETUP_MESSAGE,
@@ -328,10 +329,10 @@ async function runExtractingAudio(job: Row): Promise<Row> {
   // Signed for long enough to cover multi-hour sources.
   const sourceUrl = await createSignedSourceUrl(storagePath, 12 * 3600);
   const { chunks, durationSeconds } = await extractAudio({
-    jobId: job.id,
-    projectId: job.project_id,
     sourceUrl,
+    fileName: request.sourceVideo.fileName ?? "source.mp4",
   });
+
 
   await updateJob(job.id, {
     // Chunk descriptors are kept on the job so transcription can resume.
@@ -429,21 +430,22 @@ async function runScoringSegments(job: Row): Promise<Row> {
     text: string;
   }[];
 
-  const candidates = await selectShortClipCandidates({
+  const selection = await selectShortClipCandidates({
     request,
     transcript,
     durationSeconds:
       request.sourceVideo.durationSeconds ??
       (transcription.duration_seconds == null ? null : Number(transcription.duration_seconds)),
   });
+  const candidates = selection.candidates;
 
-  if (candidates.length === 0) {
+  if (candidates.filter((candidate) => candidate.selected).length === 0) {
     throw new Error(
       "A análise não encontrou nenhum trecho que atenda aos critérios configurados. Ajuste os critérios ou a duração dos cortes.",
     );
   }
 
-  /** Real transcript text inside the candidate range — the base for future evaluations. */
+  /** Real transcript text inside the candidate range — the base for the evaluation. */
   const excerptFor = (startSeconds: number, endSeconds: number): string =>
     transcript
       .filter((segment) => segment.endSeconds > startSeconds && segment.startSeconds < endSeconds)
@@ -463,25 +465,56 @@ async function runScoringSegments(job: Row): Promise<Row> {
         duration_seconds: candidate.durationSeconds,
         title: candidate.title,
         reason: candidate.reason,
+        explanation: candidate.explanation,
         criteria: candidate.criteria,
+        keywords: candidate.keywords,
         topic: candidate.topic,
+        category: candidate.category,
         has_speech: candidate.hasSpeech,
-        score: candidate.score,
-        relevance_score: candidate.score,
+        context_requirement: candidate.contextRequirement,
+        analysis_confidence: candidate.analysisConfidence,
+        // Final, explainable score plus every dimension behind it.
+        score: candidate.clipScore,
+        clip_score: candidate.clipScore,
+        relevance_score: candidate.clipScore,
+        quality_score: candidate.composition.intrinsicScore,
+        hook_score: candidate.scores.hookScore ?? null,
+        context_score: candidate.scores.contextScore ?? null,
+        emotion_score: candidate.scores.emotionScore ?? null,
+        story_score: candidate.scores.storyScore ?? null,
+        novelty_score: candidate.scores.noveltyScore ?? null,
+        shareability_score: candidate.scores.shareabilityScore ?? null,
+        comment_potential_score: candidate.scores.commentPotentialScore ?? null,
+        retention_potential_score: candidate.scores.retentionPotentialScore ?? null,
+        creator_fit_score: candidate.scores.creatorFitScore ?? null,
+        platform_fit_score: candidate.scores.platformFitScore ?? null,
+        growth_potential_score: candidate.scores.growthPotentialScore ?? null,
+        top_signals: candidate.topSignals,
+        score_breakdown: candidate.composition as unknown as Row,
+        score_weights: candidate.composition.weights as unknown as Row,
+        intelligence_version: candidate.composition.version,
+        diversity_penalty: candidate.diversityPenalty,
+        diversity_group: candidate.diversityGroup,
+        selected: candidate.selected,
+        selection_rank: candidate.selectionRank,
+        selection_reason: candidate.selectionReason,
         transcript_excerpt: excerptFor(candidate.startSeconds, candidate.endSeconds),
         analysis_sources: ["transcript", "context"],
-        // Structured slot for future intelligence layers (hook, retenção, payoff…).
-        evaluations: {},
+        evaluations: { dimensions: candidate.scores } as unknown as Row,
+        evaluated_at: new Date().toISOString(),
         order_index: index,
-        status: "selected",
+        status: candidate.selected ? "selected" : "discarded",
       })),
     )
     .select("*");
   if (error) throw new Error(error.message);
 
+  // Only the selected candidates become timeline segments / renderable clips.
+  const selectedRows = (inserted ?? []).filter((candidate: Row) => candidate.selected);
+
   await supabaseAdmin.from("video_segments").delete().eq("project_id", job.project_id);
   await supabaseAdmin.from("video_segments").insert(
-    (inserted ?? []).map((candidate) => ({
+    selectedRows.map((candidate: Row) => ({
       project_id: job.project_id,
       start_seconds: candidate.start_seconds,
       end_seconds: candidate.end_seconds,
@@ -490,9 +523,9 @@ async function runScoringSegments(job: Row): Promise<Row> {
       score: candidate.score,
       overall_score: candidate.score,
       transcript_score: candidate.score,
-      reason: candidate.reason,
+      reason: candidate.explanation ?? candidate.reason,
       reason_summary: candidate.reason,
-      category: candidate.topic,
+      category: candidate.category ?? candidate.topic,
       reason_codes: candidate.criteria ?? [],
       analysis_sources: ["transcript", "context"],
     })),
@@ -500,9 +533,10 @@ async function runScoringSegments(job: Row): Promise<Row> {
 
   return moveTo(job, "preparing_outputs", {
     steps: { scoring_segments: "done" },
-    message: `${inserted?.length ?? 0} corte(s) selecionado(s) com timestamps reais da transcrição.`,
+    message: `${selectedRows.length} de ${selection.evaluatedCount} candidato(s) avaliado(s) foram selecionados (mínimo alvo: ${selection.minimumClipCount}), com notas de hook, contexto, emoção, narrativa, retenção e expansão de alcance.`,
   });
 }
+
 
 async function runPreparingOutputs(job: Row): Promise<Row> {
   const { data: candidates } = await supabaseAdmin
@@ -515,7 +549,7 @@ async function runPreparingOutputs(job: Row): Promise<Row> {
 
   await supabaseAdmin.from("short_clips").delete().eq("project_id", job.project_id);
   const { error } = await supabaseAdmin.from("short_clips").insert(
-    candidates.map((candidate, index) => ({
+    candidates.filter((candidate: Row) => candidate.selected).map((candidate: Row, index: number) => ({
       project_id: job.project_id,
       job_id: job.id,
       candidate_id: candidate.id,
@@ -585,46 +619,57 @@ async function runRendering(job: Row): Promise<Row> {
 
   // Rendered in batches so multi-hour sources report real, incremental progress.
   const batch = pending.slice(0, RENDER_BATCH_SIZE);
-  const targets: RenderClipRequest[] = [];
-  for (const clip of batch) {
-    const upload = await createClipUploadUrl(`${job.project_id}/${clip.id}.mp4`);
-    targets.push({
-      id: clip.id,
-      startSeconds: Number(clip.source_start_seconds),
-      endSeconds: Number(clip.source_end_seconds ?? clip.source_start_seconds),
-      title: clip.title,
-      uploadUrl: upload.uploadUrl,
-      storagePath: upload.path,
-    });
-  }
+  const targets: RenderClipRequest[] = batch.map((clip: Row) => ({
+    id: clip.id,
+    startSeconds: Number(clip.source_start_seconds),
+    endSeconds: Number(clip.source_end_seconds ?? clip.source_start_seconds),
+    title: clip.title,
+  }));
 
   const results = await renderClips({
-    jobId: job.id,
-    projectId: job.project_id,
     sourceUrl,
-    bucket: CLIPS_BUCKET,
+    fileName: request.sourceVideo.fileName ?? "source.mp4",
     clips: targets,
   });
 
   let rendered = 0;
   for (const result of results) {
-    if (result.error || !result.storagePath) {
+    if (result.error || !result.downloadUrl) {
       await supabaseAdmin
         .from("short_clips")
         .update({ render_status: "error", render_error: result.error ?? "Falha na renderização." })
         .eq("id", result.id);
       continue;
     }
+
+    // The worker only serves the file temporarily, so it is persisted here.
+    let stored: { path: string; sizeBytes: number };
+    try {
+      stored = await storeClipFromUrl(`${job.project_id}/${result.id}.mp4`, result.downloadUrl);
+    } catch (error) {
+      await supabaseAdmin
+        .from("short_clips")
+        .update({
+          render_status: "error",
+          render_error: error instanceof Error ? error.message : "Falha ao salvar o corte.",
+        })
+        .eq("id", result.id);
+      continue;
+    }
+
     rendered += 1;
+    const duration =
+      result.startSeconds != null && result.endSeconds != null
+        ? Math.max(0, result.endSeconds - result.startSeconds)
+        : null;
     await supabaseAdmin
       .from("short_clips")
       .update({
         render_status: "rendered",
         render_error: null,
-        video_storage_path: result.storagePath,
-        file_size_bytes: result.sizeBytes,
-        ...(result.durationSeconds ? { duration_seconds: result.durationSeconds } : {}),
-        ...(result.thumbnailPath ? { thumbnail_url: result.thumbnailPath } : {}),
+        video_storage_path: stored.path,
+        file_size_bytes: stored.sizeBytes,
+        ...(duration ? { duration_seconds: duration } : {}),
       })
       .eq("id", result.id);
     const candidateId = clips.find((clip: Row) => clip.id === result.id)?.candidate_id;
@@ -635,6 +680,7 @@ async function runRendering(job: Row): Promise<Row> {
         .eq("id", candidateId);
     }
   }
+
 
   const totalRendered = alreadyRendered + rendered;
   const remaining = pending.length - batch.length;
