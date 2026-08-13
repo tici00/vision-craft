@@ -430,21 +430,22 @@ async function runScoringSegments(job: Row): Promise<Row> {
     text: string;
   }[];
 
-  const candidates = await selectShortClipCandidates({
+  const selection = await selectShortClipCandidates({
     request,
     transcript,
     durationSeconds:
       request.sourceVideo.durationSeconds ??
       (transcription.duration_seconds == null ? null : Number(transcription.duration_seconds)),
   });
+  const candidates = selection.candidates;
 
-  if (candidates.length === 0) {
+  if (candidates.filter((candidate) => candidate.selected).length === 0) {
     throw new Error(
       "A análise não encontrou nenhum trecho que atenda aos critérios configurados. Ajuste os critérios ou a duração dos cortes.",
     );
   }
 
-  /** Real transcript text inside the candidate range — the base for future evaluations. */
+  /** Real transcript text inside the candidate range — the base for the evaluation. */
   const excerptFor = (startSeconds: number, endSeconds: number): string =>
     transcript
       .filter((segment) => segment.endSeconds > startSeconds && segment.startSeconds < endSeconds)
@@ -464,21 +465,50 @@ async function runScoringSegments(job: Row): Promise<Row> {
         duration_seconds: candidate.durationSeconds,
         title: candidate.title,
         reason: candidate.reason,
+        explanation: candidate.explanation,
         criteria: candidate.criteria,
+        keywords: candidate.keywords,
         topic: candidate.topic,
+        category: candidate.category,
         has_speech: candidate.hasSpeech,
-        score: candidate.score,
-        relevance_score: candidate.score,
+        context_requirement: candidate.contextRequirement,
+        analysis_confidence: candidate.analysisConfidence,
+        // Final, explainable score plus every dimension behind it.
+        score: candidate.clipScore,
+        clip_score: candidate.clipScore,
+        relevance_score: candidate.clipScore,
+        quality_score: candidate.composition.intrinsicScore,
+        hook_score: candidate.scores.hookScore ?? null,
+        context_score: candidate.scores.contextScore ?? null,
+        emotion_score: candidate.scores.emotionScore ?? null,
+        story_score: candidate.scores.storyScore ?? null,
+        novelty_score: candidate.scores.noveltyScore ?? null,
+        shareability_score: candidate.scores.shareabilityScore ?? null,
+        comment_potential_score: candidate.scores.commentPotentialScore ?? null,
+        retention_potential_score: candidate.scores.retentionPotentialScore ?? null,
+        creator_fit_score: candidate.scores.creatorFitScore ?? null,
+        platform_fit_score: candidate.scores.platformFitScore ?? null,
+        growth_potential_score: candidate.scores.growthPotentialScore ?? null,
+        top_signals: candidate.topSignals,
+        score_breakdown: candidate.composition as unknown as Row,
+        score_weights: candidate.composition.weights as unknown as Row,
+        intelligence_version: candidate.composition.version,
+        diversity_penalty: candidate.diversityPenalty,
+        diversity_group: candidate.diversityGroup,
+        selected: candidate.selected,
+        selection_rank: candidate.selectionRank,
+        selection_reason: candidate.selectionReason,
         transcript_excerpt: excerptFor(candidate.startSeconds, candidate.endSeconds),
         analysis_sources: ["transcript", "context"],
-        // Structured slot for future intelligence layers (hook, retenção, payoff…).
-        evaluations: {},
+        evaluations: { dimensions: candidate.scores } as unknown as Row,
+        evaluated_at: new Date().toISOString(),
         order_index: index,
-        status: "selected",
+        status: candidate.selected ? "selected" : "discarded",
       })),
     )
     .select("*");
   if (error) throw new Error(error.message);
+
 
   await supabaseAdmin.from("video_segments").delete().eq("project_id", job.project_id);
   await supabaseAdmin.from("video_segments").insert(
