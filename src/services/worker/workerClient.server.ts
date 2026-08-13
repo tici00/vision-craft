@@ -9,6 +9,10 @@
  * Nothing in this module simulates work: when the worker is unreachable or
  * returns an error, a `WorkerError` is thrown so the job records an honest
  * failure instead of a fake success.
+ *
+ * Authentication: the worker validates the `x-worker-token` header. The token
+ * is read from the `VIDEO_WORKER_TOKEN` environment secret at call time and is
+ * never logged, persisted or exposed to the browser.
  */
 
 import type {
@@ -45,9 +49,6 @@ export class WorkerError extends Error {
   }
 }
 
-/** Audio chunk length requested from the worker (technical detail, invisible to users). */
-export const AUDIO_CHUNK_SECONDS = 600;
-
 /** Clips rendered per worker call, so long jobs progress incrementally. */
 export const RENDER_BATCH_SIZE = 4;
 
@@ -80,6 +81,11 @@ function requireConfig(): WorkerConfig {
   return config;
 }
 
+/** Auth headers for the worker. The token value never leaves this module. */
+function authHeaders(config: WorkerConfig): Record<string, string> {
+  return config.token ? { "x-worker-token": config.token } : {};
+}
+
 function friendlyMessage(status: number, path: string, body: string): string {
   const detail = body.trim().slice(0, 400);
   switch (status) {
@@ -95,22 +101,28 @@ function friendlyMessage(status: number, path: string, body: string): string {
   }
 }
 
+/** Worker media URLs may come back as http://; upgrade them for browser/edge use. */
+function normalizeWorkerUrl(url: string): string {
+  return url.startsWith("http://") ? `https://${url.slice("http://".length)}` : url;
+}
+
 interface RequestOptions {
   method?: "GET" | "POST";
   timeoutMs?: number;
   retries?: number;
+  /** Streaming multipart body (used for the video uploads). */
+  body?: BodyInit;
+  contentType?: string;
 }
 
 /** Single entry point for every worker HTTP call. */
-export async function workerRequest<T>(
-  path: string,
-  body?: unknown,
-  options: RequestOptions = {},
-): Promise<T> {
+export async function workerRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const config = requireConfig();
-  const method = options.method ?? (body === undefined ? "GET" : "POST");
+  const method = options.method ?? (options.body === undefined ? "GET" : "POST");
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxAttempts = (options.retries ?? COLD_START_RETRIES) + 1;
+  const streaming = options.body instanceof ReadableStream;
+  // A streamed body cannot be replayed, so retries only apply to buffered calls.
+  const maxAttempts = streaming ? 1 : (options.retries ?? COLD_START_RETRIES) + 1;
 
   let lastError: WorkerError | null = null;
 
@@ -122,12 +134,14 @@ export async function workerRequest<T>(
         method,
         headers: {
           Accept: "application/json",
-          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-          ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}),
+          ...(options.contentType ? { "Content-Type": options.contentType } : {}),
+          ...authHeaders(config),
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(options.body === undefined ? {} : { body: options.body }),
         signal: controller.signal,
-      });
+        // Required by the runtime when the request body is a stream.
+        ...(streaming ? ({ duplex: "half" } as Record<string, unknown>) : {}),
+      } as RequestInit);
 
       const text = await response.text();
 
@@ -180,6 +194,76 @@ export async function workerRequest<T>(
   throw lastError ?? new WorkerError(0, path, `Falha ao chamar o serviço de mídia em ${path}.`);
 }
 
+/* --------------------------------------------------- streaming multipart body */
+
+interface MultipartFile {
+  field: string;
+  fileName: string;
+  contentType: string;
+  stream: ReadableStream<Uint8Array>;
+}
+
+/**
+ * Builds a streamed multipart/form-data body. The source video is piped from
+ * storage straight to the worker, so multi-hour files are never fully buffered
+ * in memory.
+ */
+function multipartStream(
+  fields: Record<string, string>,
+  file: MultipartFile,
+): { body: ReadableStream<Uint8Array>; contentType: string } {
+  const boundary = `----visioncraft${crypto.randomUUID().replace(/-/g, "")}`;
+  const encoder = new TextEncoder();
+
+  let head = "";
+  for (const [name, value] of Object.entries(fields)) {
+    head += `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`;
+  }
+  head +=
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="${file.field}"; filename="${file.fileName}"\r\n` +
+    `Content-Type: ${file.contentType}\r\n\r\n`;
+
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(encoder.encode(head));
+      const reader = file.stream.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) controller.enqueue(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      controller.enqueue(encoder.encode(`\r\n--${boundary}--\r\n`));
+      controller.close();
+    },
+  });
+
+  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+async function openSourceStream(
+  sourceUrl: string,
+): Promise<{ stream: ReadableStream<Uint8Array>; contentType: string }> {
+  const response = await fetch(sourceUrl);
+  if (!response.ok || !response.body) {
+    throw new WorkerError(
+      response.status || 0,
+      "storage",
+      `Não foi possível ler o vídeo de origem para enviar ao serviço de mídia (${response.status}).`,
+    );
+  }
+  return {
+    stream: response.body as ReadableStream<Uint8Array>,
+    contentType: response.headers.get("content-type") ?? "video/mp4",
+  };
+}
+
+/* ----------------------------------------------------------------- endpoints */
+
 /** Real availability check — the pipeline only advances after this succeeds. */
 export async function checkWorkerHealth(): Promise<WorkerHealth> {
   const payload = await workerRequest<{
@@ -187,7 +271,7 @@ export async function checkWorkerHealth(): Promise<WorkerHealth> {
     service?: string;
     ffmpeg?: string;
     timestamp?: string;
-  }>("/health", undefined, { timeoutMs: HEALTH_TIMEOUT_MS, retries: 2 });
+  }>("/health", { timeoutMs: HEALTH_TIMEOUT_MS, retries: 2 });
 
   if (!payload.ok) {
     throw new WorkerError(502, "/health", "O serviço de mídia respondeu que não está saudável.");
@@ -207,107 +291,99 @@ export async function checkWorkerHealth(): Promise<WorkerHealth> {
   };
 }
 
-interface WorkerAudioResponse {
-  ok?: boolean;
-  error?: string;
-  durationSeconds?: number | null;
-  chunks?: {
-    index?: number;
-    startSeconds?: number;
-    durationSeconds?: number | null;
-    downloadUrl?: string;
-    url?: string;
-    format?: string;
-  }[];
-}
-
 export interface ExtractAudioResult {
   chunks: AudioChunk[];
   durationSeconds: number | null;
 }
 
 /**
- * Extracts and splits the audio track of a source of any length. Chunking is a
- * technical decision inside the worker layer: a 4h recording is still one video.
+ * Extracts the audio track of a source of any length. The video is streamed to
+ * the worker, which returns a single audio file placed at second 0 of the
+ * source timeline.
  */
 export async function extractAudio(params: ExtractAudioParams): Promise<ExtractAudioResult> {
-  const payload = await workerRequest<WorkerAudioResponse>("/extract-audio", {
-    jobId: params.jobId,
-    projectId: params.projectId,
-    sourceUrl: params.sourceUrl,
-    chunkSeconds: params.chunkSeconds ?? AUDIO_CHUNK_SECONDS,
-    outputFormat: params.outputFormat ?? "mp3",
-  });
+  const source = await openSourceStream(params.sourceUrl);
+  const { body, contentType } = multipartStream(
+    {},
+    {
+      field: "video",
+      fileName: params.fileName ?? "source.mp4",
+      contentType: params.contentType ?? source.contentType,
+      stream: source.stream,
+    },
+  );
 
-  if (payload.ok === false) {
+  const payload = await workerRequest<{
+    ok?: boolean;
+    error?: string;
+    audioId?: string;
+    audioUrl?: string;
+    durationSeconds?: number | null;
+  }>("/extract-audio", { body, contentType });
+
+  if (payload.ok === false || !payload.audioUrl) {
     throw new WorkerError(502, "/extract-audio", payload.error ?? "Falha ao extrair o áudio.");
   }
 
-  const chunks = (payload.chunks ?? [])
-    .map((chunk, position) => ({
-      index: chunk.index ?? position,
-      startSeconds: Number(chunk.startSeconds ?? 0),
-      durationSeconds: chunk.durationSeconds == null ? null : Number(chunk.durationSeconds),
-      downloadUrl: chunk.downloadUrl ?? chunk.url ?? "",
-      format: chunk.format ?? "mp3",
-    }))
-    .filter((chunk) => chunk.downloadUrl.length > 0)
-    .sort((a, b) => a.startSeconds - b.startSeconds);
-
-  if (chunks.length === 0) {
-    throw new WorkerError(
-      502,
-      "/extract-audio",
-      payload.error ?? "O serviço de mídia não retornou nenhum trecho de áudio utilizável.",
-    );
-  }
-
   return {
-    chunks,
-    durationSeconds: payload.durationSeconds == null ? null : Number(payload.durationSeconds),
+    chunks: [
+      {
+        index: 0,
+        startSeconds: 0,
+        durationSeconds: payload.durationSeconds ?? null,
+        downloadUrl: normalizeWorkerUrl(payload.audioUrl),
+        format: payload.audioUrl.split(".").pop()?.toLowerCase() ?? "mp3",
+      },
+    ],
+    durationSeconds: payload.durationSeconds ?? null,
   };
 }
 
-interface WorkerRenderResponse {
-  ok?: boolean;
-  error?: string;
-  clips?: {
-    id?: string;
-    storagePath?: string | null;
-    sizeBytes?: number | null;
-    durationSeconds?: number | null;
-    thumbnailPath?: string | null;
-    error?: string | null;
-  }[];
-}
-
-/** Cuts real clip files with ffmpeg and uploads them to the signed destinations. */
+/**
+ * Renders a batch of clips. The worker returns one file per requested range, in
+ * the same order; Vision Craft then copies each file into storage.
+ */
 export async function renderClips(params: RenderClipsParams): Promise<RenderClipResult[]> {
-  const payload = await workerRequest<WorkerRenderResponse>("/render-clips", {
-    jobId: params.jobId,
-    projectId: params.projectId,
-    sourceUrl: params.sourceUrl,
-    bucket: params.bucket,
-    clips: params.clips,
-  });
+  if (params.clips.length === 0) return [];
+
+  const source = await openSourceStream(params.sourceUrl);
+  const { body, contentType } = multipartStream(
+    {
+      clips: JSON.stringify(
+        params.clips.map((clip) => ({
+          id: clip.id,
+          start: Number(clip.startSeconds.toFixed(3)),
+          end: Number(clip.endSeconds.toFixed(3)),
+        })),
+      ),
+    },
+    {
+      field: "video",
+      fileName: params.fileName ?? "source.mp4",
+      contentType: params.contentType ?? source.contentType,
+      stream: source.stream,
+    },
+  );
+
+  const payload = await workerRequest<{
+    ok?: boolean;
+    error?: string;
+    clips?: { id?: string; start?: number; end?: number; url?: string; error?: string }[];
+  }>("/render-clips", { body, contentType });
 
   if (payload.ok === false) {
     throw new WorkerError(502, "/render-clips", payload.error ?? "Falha ao renderizar os cortes.");
   }
-  if (!payload.clips?.length) {
-    throw new WorkerError(
-      502,
-      "/render-clips",
-      payload.error ?? "O serviço de mídia não retornou nenhum corte renderizado.",
-    );
-  }
 
-  return payload.clips.map((clip, position) => ({
-    id: clip.id ?? params.clips[position]?.id ?? "",
-    storagePath: clip.storagePath ?? null,
-    sizeBytes: clip.sizeBytes == null ? null : Number(clip.sizeBytes),
-    durationSeconds: clip.durationSeconds == null ? null : Number(clip.durationSeconds),
-    thumbnailPath: clip.thumbnailPath ?? null,
-    error: clip.error ?? null,
-  }));
+  const returned = payload.clips ?? [];
+  return params.clips.map((clip, index) => {
+    const result = returned[index];
+    return {
+      id: clip.id,
+      downloadUrl: result?.url ? normalizeWorkerUrl(result.url) : null,
+      startSeconds: result?.start ?? clip.startSeconds,
+      endSeconds: result?.end ?? clip.endSeconds,
+      error: result?.error ?? (result?.url ? null : "O serviço de mídia não retornou o arquivo."),
+    };
+  });
 }
