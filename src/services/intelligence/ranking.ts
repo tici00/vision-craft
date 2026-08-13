@@ -20,9 +20,11 @@ import {
   EXTRA_CLIP_THRESHOLD,
   QUALITY_THRESHOLD,
   composeClipScore,
+  type ClipDimensionKey,
   type ClipScoreComposition,
   type ClipScores,
 } from "./clipIntelligence";
+
 
 export interface RankableCandidate {
   startSeconds: number;
