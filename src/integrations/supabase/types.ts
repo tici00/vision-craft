@@ -16,130 +16,196 @@ export type Database = {
     Tables: {
       clip_candidates: {
         Row: {
+          analysis_confidence: number | null
           analysis_notes: string | null
           analysis_sources: string[]
+          category: string | null
           clarity_score: number | null
+          clip_score: number | null
           comment_potential_score: number | null
+          context_requirement: string | null
+          context_score: number | null
           created_at: string
           creator_affinity_score: number | null
+          creator_fit_score: number | null
           criteria: string[]
           curiosity_score: number | null
           description: string | null
+          diversity_group: string | null
+          diversity_penalty: number | null
           duration_seconds: number
           emotion_score: number | null
           end_seconds: number
           evaluated_at: string | null
           evaluation_model: string | null
           evaluations: Json
+          explanation: string | null
+          growth_potential_score: number | null
           has_speech: boolean | null
           hook_score: number | null
           id: string
+          intelligence_version: string | null
           job_id: string | null
           keywords: string[]
+          manual_override: string | null
+          novelty_score: number | null
           order_index: number
           originality_score: number | null
           overall_potential_score: number | null
           pacing_score: number | null
           payoff_score: number | null
+          platform_fit_score: number | null
           project_id: string
           quality_score: number | null
           reach_expansion_score: number | null
           reason: string | null
           relevance_score: number | null
           replay_score: number | null
+          retention_potential_score: number | null
           retention_score: number | null
           score: number | null
+          score_breakdown: Json
+          score_weights: Json
+          selected: boolean
+          selection_rank: number | null
+          selection_reason: string | null
           shareability_score: number | null
           start_seconds: number
           status: string
           status_message: string | null
+          story_score: number | null
           title: string
+          top_signals: string[]
           topic: string | null
           transcript_excerpt: string | null
           updated_at: string
         }
         Insert: {
+          analysis_confidence?: number | null
           analysis_notes?: string | null
           analysis_sources?: string[]
+          category?: string | null
           clarity_score?: number | null
+          clip_score?: number | null
           comment_potential_score?: number | null
+          context_requirement?: string | null
+          context_score?: number | null
           created_at?: string
           creator_affinity_score?: number | null
+          creator_fit_score?: number | null
           criteria?: string[]
           curiosity_score?: number | null
           description?: string | null
+          diversity_group?: string | null
+          diversity_penalty?: number | null
           duration_seconds: number
           emotion_score?: number | null
           end_seconds: number
           evaluated_at?: string | null
           evaluation_model?: string | null
           evaluations?: Json
+          explanation?: string | null
+          growth_potential_score?: number | null
           has_speech?: boolean | null
           hook_score?: number | null
           id?: string
+          intelligence_version?: string | null
           job_id?: string | null
           keywords?: string[]
+          manual_override?: string | null
+          novelty_score?: number | null
           order_index?: number
           originality_score?: number | null
           overall_potential_score?: number | null
           pacing_score?: number | null
           payoff_score?: number | null
+          platform_fit_score?: number | null
           project_id: string
           quality_score?: number | null
           reach_expansion_score?: number | null
           reason?: string | null
           relevance_score?: number | null
           replay_score?: number | null
+          retention_potential_score?: number | null
           retention_score?: number | null
           score?: number | null
+          score_breakdown?: Json
+          score_weights?: Json
+          selected?: boolean
+          selection_rank?: number | null
+          selection_reason?: string | null
           shareability_score?: number | null
           start_seconds: number
           status?: string
           status_message?: string | null
+          story_score?: number | null
           title?: string
+          top_signals?: string[]
           topic?: string | null
           transcript_excerpt?: string | null
           updated_at?: string
         }
         Update: {
+          analysis_confidence?: number | null
           analysis_notes?: string | null
           analysis_sources?: string[]
+          category?: string | null
           clarity_score?: number | null
+          clip_score?: number | null
           comment_potential_score?: number | null
+          context_requirement?: string | null
+          context_score?: number | null
           created_at?: string
           creator_affinity_score?: number | null
+          creator_fit_score?: number | null
           criteria?: string[]
           curiosity_score?: number | null
           description?: string | null
+          diversity_group?: string | null
+          diversity_penalty?: number | null
           duration_seconds?: number
           emotion_score?: number | null
           end_seconds?: number
           evaluated_at?: string | null
           evaluation_model?: string | null
           evaluations?: Json
+          explanation?: string | null
+          growth_potential_score?: number | null
           has_speech?: boolean | null
           hook_score?: number | null
           id?: string
+          intelligence_version?: string | null
           job_id?: string | null
           keywords?: string[]
+          manual_override?: string | null
+          novelty_score?: number | null
           order_index?: number
           originality_score?: number | null
           overall_potential_score?: number | null
           pacing_score?: number | null
           payoff_score?: number | null
+          platform_fit_score?: number | null
           project_id?: string
           quality_score?: number | null
           reach_expansion_score?: number | null
           reason?: string | null
           relevance_score?: number | null
           replay_score?: number | null
+          retention_potential_score?: number | null
           retention_score?: number | null
           score?: number | null
+          score_breakdown?: Json
+          score_weights?: Json
+          selected?: boolean
+          selection_rank?: number | null
+          selection_reason?: string | null
           shareability_score?: number | null
           start_seconds?: number
           status?: string
           status_message?: string | null
+          story_score?: number | null
           title?: string
+          top_signals?: string[]
           topic?: string | null
           transcript_excerpt?: string | null
           updated_at?: string
@@ -160,6 +226,266 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      clip_performance_observations: {
+        Row: {
+          average_watch_seconds: number | null
+          caption: string | null
+          clip_duration_seconds: number | null
+          clip_id: string | null
+          comments: number | null
+          completion_rate: number | null
+          created_at: string
+          format: string | null
+          growth_timeline: Json
+          hashtags: string[]
+          id: string
+          likes: number | null
+          measured_at: string | null
+          observed_score: number | null
+          platform: string
+          project_id: string
+          publication_url: string | null
+          published_at: string | null
+          raw_metrics: Json
+          retention_rate: number | null
+          saves: number | null
+          shares: number | null
+          source: string
+          updated_at: string
+          views: number | null
+        }
+        Insert: {
+          average_watch_seconds?: number | null
+          caption?: string | null
+          clip_duration_seconds?: number | null
+          clip_id?: string | null
+          comments?: number | null
+          completion_rate?: number | null
+          created_at?: string
+          format?: string | null
+          growth_timeline?: Json
+          hashtags?: string[]
+          id?: string
+          likes?: number | null
+          measured_at?: string | null
+          observed_score?: number | null
+          platform: string
+          project_id: string
+          publication_url?: string | null
+          published_at?: string | null
+          raw_metrics?: Json
+          retention_rate?: number | null
+          saves?: number | null
+          shares?: number | null
+          source?: string
+          updated_at?: string
+          views?: number | null
+        }
+        Update: {
+          average_watch_seconds?: number | null
+          caption?: string | null
+          clip_duration_seconds?: number | null
+          clip_id?: string | null
+          comments?: number | null
+          completion_rate?: number | null
+          created_at?: string
+          format?: string | null
+          growth_timeline?: Json
+          hashtags?: string[]
+          id?: string
+          likes?: number | null
+          measured_at?: string | null
+          observed_score?: number | null
+          platform?: string
+          project_id?: string
+          publication_url?: string | null
+          published_at?: string | null
+          raw_metrics?: Json
+          retention_rate?: number | null
+          saves?: number | null
+          shares?: number | null
+          source?: string
+          updated_at?: string
+          views?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clip_performance_observations_clip_id_fkey"
+            columns: ["clip_id"]
+            isOneToOne: false
+            referencedRelation: "short_clips"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clip_performance_observations_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clip_performance_predictions: {
+        Row: {
+          candidate_id: string | null
+          clip_id: string | null
+          created_at: string
+          format: string | null
+          id: string
+          intelligence_version: string | null
+          job_id: string | null
+          model: string | null
+          platform: string | null
+          predicted_clip_score: number | null
+          predicted_comment_potential: number | null
+          predicted_growth_score: number | null
+          predicted_retention: number | null
+          predicted_shareability: number | null
+          project_id: string
+          score_breakdown: Json
+          signals: Json
+          updated_at: string
+        }
+        Insert: {
+          candidate_id?: string | null
+          clip_id?: string | null
+          created_at?: string
+          format?: string | null
+          id?: string
+          intelligence_version?: string | null
+          job_id?: string | null
+          model?: string | null
+          platform?: string | null
+          predicted_clip_score?: number | null
+          predicted_comment_potential?: number | null
+          predicted_growth_score?: number | null
+          predicted_retention?: number | null
+          predicted_shareability?: number | null
+          project_id: string
+          score_breakdown?: Json
+          signals?: Json
+          updated_at?: string
+        }
+        Update: {
+          candidate_id?: string | null
+          clip_id?: string | null
+          created_at?: string
+          format?: string | null
+          id?: string
+          intelligence_version?: string | null
+          job_id?: string | null
+          model?: string | null
+          platform?: string | null
+          predicted_clip_score?: number | null
+          predicted_comment_potential?: number | null
+          predicted_growth_score?: number | null
+          predicted_retention?: number | null
+          predicted_shareability?: number | null
+          project_id?: string
+          score_breakdown?: Json
+          signals?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clip_performance_predictions_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "clip_candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clip_performance_predictions_clip_id_fkey"
+            columns: ["clip_id"]
+            isOneToOne: false
+            referencedRelation: "short_clips"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clip_performance_predictions_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "processing_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clip_performance_predictions_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      creator_performance_profiles: {
+        Row: {
+          caption_patterns: Json
+          clip_types: Json
+          comment_patterns: Json
+          created_at: string
+          creator_key: string
+          display_name: string | null
+          durations: Json
+          emotions: Json
+          formats: Json
+          hook_styles: Json
+          id: string
+          last_computed_at: string | null
+          platforms: Json
+          posting_times: Json
+          retention_patterns: Json
+          sample_size: number
+          share_patterns: Json
+          top_content: Json
+          topics: Json
+          updated_at: string
+        }
+        Insert: {
+          caption_patterns?: Json
+          clip_types?: Json
+          comment_patterns?: Json
+          created_at?: string
+          creator_key: string
+          display_name?: string | null
+          durations?: Json
+          emotions?: Json
+          formats?: Json
+          hook_styles?: Json
+          id?: string
+          last_computed_at?: string | null
+          platforms?: Json
+          posting_times?: Json
+          retention_patterns?: Json
+          sample_size?: number
+          share_patterns?: Json
+          top_content?: Json
+          topics?: Json
+          updated_at?: string
+        }
+        Update: {
+          caption_patterns?: Json
+          clip_types?: Json
+          comment_patterns?: Json
+          created_at?: string
+          creator_key?: string
+          display_name?: string | null
+          durations?: Json
+          emotions?: Json
+          formats?: Json
+          hook_styles?: Json
+          id?: string
+          last_computed_at?: string | null
+          platforms?: Json
+          posting_times?: Json
+          retention_patterns?: Json
+          sample_size?: number
+          share_patterns?: Json
+          top_content?: Json
+          topics?: Json
+          updated_at?: string
+        }
+        Relationships: []
       }
       edit_configurations: {
         Row: {
