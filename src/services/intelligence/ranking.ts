@@ -53,7 +53,7 @@ export interface RankingOptions {
   maximumClipCount: number;
   /** User asked to avoid similar clips. */
   avoidSimilar: boolean;
-  weights?: Record<string, number>;
+  weights?: Partial<Record<ClipDimensionKey, number>>;
 }
 
 /** Diversity penalty applied to the Nth clip of an already-used group. */
