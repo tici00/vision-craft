@@ -549,7 +549,7 @@ async function runPreparingOutputs(job: Row): Promise<Row> {
 
   await supabaseAdmin.from("short_clips").delete().eq("project_id", job.project_id);
   const { error } = await supabaseAdmin.from("short_clips").insert(
-    candidates.map((candidate, index) => ({
+    candidates.filter((candidate: Row) => candidate.selected).map((candidate: Row, index: number) => ({
       project_id: job.project_id,
       job_id: job.id,
       candidate_id: candidate.id,
