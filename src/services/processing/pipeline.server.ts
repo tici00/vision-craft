@@ -509,10 +509,12 @@ async function runScoringSegments(job: Row): Promise<Row> {
     .select("*");
   if (error) throw new Error(error.message);
 
+  // Only the selected candidates become timeline segments / renderable clips.
+  const selectedRows = (inserted ?? []).filter((candidate: Row) => candidate.selected);
 
   await supabaseAdmin.from("video_segments").delete().eq("project_id", job.project_id);
   await supabaseAdmin.from("video_segments").insert(
-    (inserted ?? []).map((candidate) => ({
+    selectedRows.map((candidate: Row) => ({
       project_id: job.project_id,
       start_seconds: candidate.start_seconds,
       end_seconds: candidate.end_seconds,
@@ -521,9 +523,9 @@ async function runScoringSegments(job: Row): Promise<Row> {
       score: candidate.score,
       overall_score: candidate.score,
       transcript_score: candidate.score,
-      reason: candidate.reason,
+      reason: candidate.explanation ?? candidate.reason,
       reason_summary: candidate.reason,
-      category: candidate.topic,
+      category: candidate.category ?? candidate.topic,
       reason_codes: candidate.criteria ?? [],
       analysis_sources: ["transcript", "context"],
     })),
@@ -531,9 +533,10 @@ async function runScoringSegments(job: Row): Promise<Row> {
 
   return moveTo(job, "preparing_outputs", {
     steps: { scoring_segments: "done" },
-    message: `${inserted?.length ?? 0} corte(s) selecionado(s) com timestamps reais da transcrição.`,
+    message: `${selectedRows.length} de ${selection.evaluatedCount} candidato(s) avaliado(s) foram selecionados (mínimo alvo: ${selection.minimumClipCount}), com notas de hook, contexto, emoção, narrativa, retenção e expansão de alcance.`,
   });
 }
+
 
 async function runPreparingOutputs(job: Row): Promise<Row> {
   const { data: candidates } = await supabaseAdmin
