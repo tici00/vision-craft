@@ -328,10 +328,10 @@ async function runExtractingAudio(job: Row): Promise<Row> {
   // Signed for long enough to cover multi-hour sources.
   const sourceUrl = await createSignedSourceUrl(storagePath, 12 * 3600);
   const { chunks, durationSeconds } = await extractAudio({
-    jobId: job.id,
-    projectId: job.project_id,
     sourceUrl,
+    fileName: request.sourceVideo.fileName ?? "source.mp4",
   });
+
 
   await updateJob(job.id, {
     // Chunk descriptors are kept on the job so transcription can resume.
@@ -585,46 +585,57 @@ async function runRendering(job: Row): Promise<Row> {
 
   // Rendered in batches so multi-hour sources report real, incremental progress.
   const batch = pending.slice(0, RENDER_BATCH_SIZE);
-  const targets: RenderClipRequest[] = [];
-  for (const clip of batch) {
-    const upload = await createClipUploadUrl(`${job.project_id}/${clip.id}.mp4`);
-    targets.push({
-      id: clip.id,
-      startSeconds: Number(clip.source_start_seconds),
-      endSeconds: Number(clip.source_end_seconds ?? clip.source_start_seconds),
-      title: clip.title,
-      uploadUrl: upload.uploadUrl,
-      storagePath: upload.path,
-    });
-  }
+  const targets: RenderClipRequest[] = batch.map((clip: Row) => ({
+    id: clip.id,
+    startSeconds: Number(clip.source_start_seconds),
+    endSeconds: Number(clip.source_end_seconds ?? clip.source_start_seconds),
+    title: clip.title,
+  }));
 
   const results = await renderClips({
-    jobId: job.id,
-    projectId: job.project_id,
     sourceUrl,
-    bucket: CLIPS_BUCKET,
+    fileName: request.sourceVideo.fileName ?? "source.mp4",
     clips: targets,
   });
 
   let rendered = 0;
   for (const result of results) {
-    if (result.error || !result.storagePath) {
+    if (result.error || !result.downloadUrl) {
       await supabaseAdmin
         .from("short_clips")
         .update({ render_status: "error", render_error: result.error ?? "Falha na renderização." })
         .eq("id", result.id);
       continue;
     }
+
+    // The worker only serves the file temporarily, so it is persisted here.
+    let stored: { path: string; sizeBytes: number };
+    try {
+      stored = await storeClipFromUrl(`${job.project_id}/${result.id}.mp4`, result.downloadUrl);
+    } catch (error) {
+      await supabaseAdmin
+        .from("short_clips")
+        .update({
+          render_status: "error",
+          render_error: error instanceof Error ? error.message : "Falha ao salvar o corte.",
+        })
+        .eq("id", result.id);
+      continue;
+    }
+
     rendered += 1;
+    const duration =
+      result.startSeconds != null && result.endSeconds != null
+        ? Math.max(0, result.endSeconds - result.startSeconds)
+        : null;
     await supabaseAdmin
       .from("short_clips")
       .update({
         render_status: "rendered",
         render_error: null,
-        video_storage_path: result.storagePath,
-        file_size_bytes: result.sizeBytes,
-        ...(result.durationSeconds ? { duration_seconds: result.durationSeconds } : {}),
-        ...(result.thumbnailPath ? { thumbnail_url: result.thumbnailPath } : {}),
+        video_storage_path: stored.path,
+        file_size_bytes: stored.sizeBytes,
+        ...(duration ? { duration_seconds: duration } : {}),
       })
       .eq("id", result.id);
     const candidateId = clips.find((clip: Row) => clip.id === result.id)?.candidate_id;
@@ -635,6 +646,7 @@ async function runRendering(job: Row): Promise<Row> {
         .eq("id", candidateId);
     }
   }
+
 
   const totalRendered = alreadyRendered + rendered;
   const remaining = pending.length - batch.length;
