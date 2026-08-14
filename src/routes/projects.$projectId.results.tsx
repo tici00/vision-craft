@@ -19,6 +19,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/common/EmptyState";
 import { TimelineRibbon } from "@/components/timeline/SegmentTimeline";
 import { projectQueries } from "@/services/queries";
+import { intelligenceQueries } from "@/services/intelligence/intelligenceService";
+import { ClipIntelligenceCard } from "@/components/intelligence/ClipIntelligenceCard";
+import { CreatorIntelligencePanel } from "@/components/intelligence/CreatorIntelligencePanel";
 import { videoProcessingService, NotImplementedError } from "@/services/videoProcessingService";
 import { seedDemoResults } from "@/services/demo/demoResults";
 import { formatDurationLabel, formatPercent, formatTimecode } from "@/lib/format";
@@ -50,6 +53,7 @@ function ResultsPage() {
   const clips = useQuery(projectQueries.clips(projectId));
   const highlights = useQuery(projectQueries.highlights(projectId));
   const longEdit = useQuery(projectQueries.longEdit(projectId));
+  const intelligence = useQuery(intelligenceQueries.project(projectId));
 
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
 
@@ -121,6 +125,10 @@ function ResultsPage() {
             <TabsTrigger value="clips">
               Clips {clips.data?.length ? `(${clips.data.length})` : ""}
             </TabsTrigger>
+            <TabsTrigger value="intelligence">
+              Intelligence{" "}
+              {intelligence.data?.candidates.length ? `(${intelligence.data.candidates.length})` : ""}
+            </TabsTrigger>
             <TabsTrigger value="highlights">Highlights</TabsTrigger>
             <TabsTrigger value="long">Edited long video</TabsTrigger>
           </TabsList>
@@ -157,6 +165,31 @@ function ResultsPage() {
                   />
                 ))}
               </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="intelligence" className="mt-8 space-y-8">
+            {intelligence.isLoading ? (
+              <Skeleton className="h-72 rounded-2xl" />
+            ) : (
+              <>
+                {intelligence.data && (
+                  <CreatorIntelligencePanel creator={intelligence.data.creator} />
+                )}
+                {(intelligence.data?.candidates.length ?? 0) === 0 ? (
+                  <EmptyState
+                    icon={<Sparkles className="size-5" />}
+                    title="Nenhuma avaliação ainda"
+                    description="As notas da Clip Intelligence aparecem aqui depois que a análise real avalia os momentos da gravação."
+                  />
+                ) : (
+                  <div className="grid gap-6 xl:grid-cols-2">
+                    {intelligence.data?.candidates.map((entry) => (
+                      <ClipIntelligenceCard key={entry.id} entry={entry} />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
 
