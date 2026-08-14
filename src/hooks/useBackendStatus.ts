@@ -28,6 +28,7 @@ export function useBackendStatus() {
   });
 
   const data = query.data;
+  const ffmpeg = data?.workerFfmpeg ? (/\d+[\w.+-]*/.exec(data.workerFfmpeg)?.[0] ?? null) : null;
   const status: BackendStatus | null = data
     ? {
         level: !data.mediaWorkerConfigured
@@ -45,13 +46,13 @@ export function useBackendStatus() {
         detail: !data.mediaWorkerConfigured
           ? data.mediaWorkerSetupMessage
           : data.workerHealthy
-            ? `ffmpeg ${data.workerFfmpeg ?? "disponível"} · transcrição e cortes reais habilitados.`
+            ? `ffmpeg ${ffmpeg ?? "disponível"} · transcrição e cortes reais habilitados.`
             : (data.workerError ??
               "O serviço pode estar acordando após inatividade. A verificação é repetida automaticamente."),
         aiConfigured: data.aiConfigured,
         workerConfigured: data.mediaWorkerConfigured,
         workerHealthy: data.workerHealthy,
-        workerFfmpeg: data.workerFfmpeg,
+        workerFfmpeg: ffmpeg,
       }
     : null;
 
