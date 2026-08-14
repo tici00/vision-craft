@@ -13,7 +13,8 @@ import { JobStatusBadge } from "@/components/projects/StatusBadge";
 import { ProcessingSteps } from "@/components/processing/ProcessingSteps";
 import { projectQueries } from "@/services/queries";
 import { videoProcessingService } from "@/services/videoProcessingService";
-import { advanceProcessing, getProcessingCapabilities } from "@/lib/processing.functions";
+import { advanceProcessing } from "@/lib/processing.functions";
+import { useBackendStatus } from "@/hooks/useBackendStatus";
 import { formatElapsed, formatPercent, formatTimecode } from "@/lib/format";
 import { ANALYSIS_STAGE_LABEL, PROCESSING_STEP_TEMPLATE } from "@/types/video-editor";
 
@@ -49,11 +50,8 @@ function ProcessingPage() {
 
   const active = job.data?.status === "queued" || job.data?.status === "running";
 
-  const capabilities = useQuery({
-    queryKey: ["processing", "capabilities"] as const,
-    queryFn: () => getProcessingCapabilities(),
-    staleTime: 60_000,
-  });
+  // Single source of truth for backend connectivity (verified health check).
+  const { status: backend } = useBackendStatus();
 
   useEffect(() => {
     if (!active) return;
@@ -255,18 +253,14 @@ function ProcessingPage() {
               <div className="rounded-xl border border-info/30 bg-info/8 p-5">
                 <div className="flex items-center gap-2 text-sm font-medium text-info">
                   <Info className="size-4" />
-                  {capabilities.data?.workerHealthy
-                    ? "Serviço de mídia conectado"
-                    : capabilities.data?.mediaWorkerConfigured
-                      ? "Serviço de mídia indisponível"
-                      : "Serviço de mídia não configurado"}
+                  {backend?.title ?? "Verificando serviços…"}
                 </div>
                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                   {job.data.stageMessage ?? ANALYSIS_STAGE_LABEL[job.data.stage]}
                 </p>
-                {!capabilities.data?.workerHealthy && (
+                {backend && backend.level !== "ok" && (
                   <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                    {capabilities.data?.renderWorkerSetupMessage}
+                    {backend.detail}
                   </p>
                 )}
               </div>

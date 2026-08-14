@@ -3,6 +3,7 @@ import { Film, LayoutGrid, PlusCircle, Sparkles, PanelLeftClose, PanelLeft } fro
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useBackendStatus } from "@/hooks/useBackendStatus";
 
 const NAV = [
   { to: "/", label: "Projects", icon: LayoutGrid, exact: true },
@@ -17,6 +18,7 @@ export function AppSidebar({
   onToggle: () => void;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { status } = useBackendStatus();
 
   return (
     <aside
@@ -66,14 +68,27 @@ export function AppSidebar({
       {!collapsed && (
         <div className="mx-3 mb-3 rounded-xl border border-sidebar-border bg-surface-raised/60 p-3">
           <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+            <span
+              className={cn(
+                "size-2 shrink-0 rounded-full",
+                !status
+                  ? "bg-muted-foreground/50"
+                  : status.level === "ok"
+                    ? "bg-success"
+                    : status.level === "degraded"
+                      ? "bg-warning"
+                      : "bg-destructive",
+              )}
+            />
             <Sparkles className="size-3.5 text-primary" />
             Processing backend
           </div>
           <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-            Jobs are queued in the database. Analysis and rendering workers are not connected yet.
+            {status ? `${status.title}. ${status.detail}` : "Verificando serviços de análise e renderização…"}
           </p>
         </div>
       )}
+
 
       <div className="border-t border-sidebar-border p-2">
         <Button
