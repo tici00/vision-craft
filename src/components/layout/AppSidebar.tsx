@@ -3,6 +3,7 @@ import { Film, LayoutGrid, PlusCircle, Sparkles, PanelLeftClose, PanelLeft } fro
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useBackendStatus } from "@/hooks/useBackendStatus";
 
 const NAV = [
   { to: "/", label: "Projects", icon: LayoutGrid, exact: true },
@@ -17,6 +18,7 @@ export function AppSidebar({
   onToggle: () => void;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { status } = useBackendStatus();
 
   return (
     <aside
