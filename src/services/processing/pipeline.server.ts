@@ -14,6 +14,7 @@ import type { AnalysisJobRequest } from "@/services/analysis/contracts";
 import type { AnalysisStage, ProcessingStep } from "@/types/video-editor";
 
 import { selectShortClipCandidates } from "./clipSelection.server";
+import { buildCreatorIntelligence } from "@/services/intelligence/creatorIntelligence";
 import {
   CLIPS_BUCKET,
   DIRECT_MEDIA_LIMIT_BYTES,
@@ -430,9 +431,44 @@ async function runScoringSegments(job: Row): Promise<Row> {
     text: string;
   }[];
 
+  // Creator Intelligence: real observed publications (if any) nudge the
+  // dimension weights. With no observations the defaults are used unchanged.
+  const { data: observationRows } = await supabaseAdmin
+    .from("clip_performance_observations")
+    .select("*");
+  const creator = buildCreatorIntelligence({
+    creatorKey: "default",
+    observations: (observationRows ?? []).map((row) => ({
+      id: row.id,
+      clipId: row.clip_id ?? null,
+      platform: row.platform,
+      publicationUrl: row.publication_url ?? null,
+      publishedAt: row.published_at ?? null,
+      caption: row.caption ?? null,
+      hashtags: (row.hashtags ?? []) as string[],
+      format: row.format ?? null,
+      clipDurationSeconds:
+        row.clip_duration_seconds == null ? null : Number(row.clip_duration_seconds),
+      views: row.views == null ? null : Number(row.views),
+      likes: row.likes == null ? null : Number(row.likes),
+      comments: row.comments == null ? null : Number(row.comments),
+      shares: row.shares == null ? null : Number(row.shares),
+      saves: row.saves == null ? null : Number(row.saves),
+      averageWatchSeconds:
+        row.average_watch_seconds == null ? null : Number(row.average_watch_seconds),
+      retentionRate: row.retention_rate == null ? null : Number(row.retention_rate),
+      completionRate: row.completion_rate == null ? null : Number(row.completion_rate),
+      growthTimeline: (row.growth_timeline ?? []) as Record<string, unknown>[],
+      observedScore: row.observed_score == null ? null : Number(row.observed_score),
+      source: row.source ?? "manual",
+      measuredAt: row.measured_at ?? null,
+    })),
+  });
+
   const selection = await selectShortClipCandidates({
     request,
     transcript,
+    weights: creator.weights,
     durationSeconds:
       request.sourceVideo.durationSeconds ??
       (transcription.duration_seconds == null ? null : Number(transcription.duration_seconds)),
