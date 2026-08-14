@@ -13,7 +13,8 @@ import { JobStatusBadge } from "@/components/projects/StatusBadge";
 import { ProcessingSteps } from "@/components/processing/ProcessingSteps";
 import { projectQueries } from "@/services/queries";
 import { videoProcessingService } from "@/services/videoProcessingService";
-import { advanceProcessing, getProcessingCapabilities } from "@/lib/processing.functions";
+import { advanceProcessing } from "@/lib/processing.functions";
+import { useBackendStatus } from "@/hooks/useBackendStatus";
 import { formatElapsed, formatPercent, formatTimecode } from "@/lib/format";
 import { ANALYSIS_STAGE_LABEL, PROCESSING_STEP_TEMPLATE } from "@/types/video-editor";
 
