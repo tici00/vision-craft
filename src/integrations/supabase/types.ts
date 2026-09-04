@@ -1084,9 +1084,14 @@ export type Database = {
       }
       transcriptions: {
         Row: {
+          audio_url: string | null
+          chunk_count: number | null
+          chunk_plan: Json | null
+          completed_chunks: number[]
           created_at: string
           detected_language: string | null
           duration_seconds: number | null
+          error_message: string | null
           id: string
           job_id: string | null
           language: string | null
@@ -1097,13 +1102,19 @@ export type Database = {
           segments: Json
           source_kind: string | null
           source_storage_path: string | null
+          status: string
           text: string
           updated_at: string
         }
         Insert: {
+          audio_url?: string | null
+          chunk_count?: number | null
+          chunk_plan?: Json | null
+          completed_chunks?: number[]
           created_at?: string
           detected_language?: string | null
           duration_seconds?: number | null
+          error_message?: string | null
           id?: string
           job_id?: string | null
           language?: string | null
@@ -1114,13 +1125,19 @@ export type Database = {
           segments?: Json
           source_kind?: string | null
           source_storage_path?: string | null
+          status?: string
           text?: string
           updated_at?: string
         }
         Update: {
+          audio_url?: string | null
+          chunk_count?: number | null
+          chunk_plan?: Json | null
+          completed_chunks?: number[]
           created_at?: string
           detected_language?: string | null
           duration_seconds?: number | null
+          error_message?: string | null
           id?: string
           job_id?: string | null
           language?: string | null
@@ -1131,6 +1148,7 @@ export type Database = {
           segments?: Json
           source_kind?: string | null
           source_storage_path?: string | null
+          status?: string
           text?: string
           updated_at?: string
         }
