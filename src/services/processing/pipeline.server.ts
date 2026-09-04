@@ -34,7 +34,24 @@ import {
   renderClips,
   type RenderClipRequest,
 } from "@/services/worker/workerClient.server";
-import { transcribeAudioChunks, transcribeDirectSource } from "./transcription.server";
+import {
+  transcribeAudioChunks,
+  transcribeDirectSource,
+  transcribeMp3Chunk,
+  type TranscriptSegment,
+} from "./transcription.server";
+import {
+  planMp3Chunks,
+  type Mp3ChunkPlan,
+  type Mp3ChunkPlanEntry,
+} from "./audioChunker.server";
+
+/** Language the user asked for, when transcription language is set manually. */
+function transcriptionLanguageHint(request: AnalysisJobRequest): string | null {
+  return request.language.mode === "manual"
+    ? (request.language.transcriptionLanguage ?? request.language.primary ?? null)
+    : null;
+}
 
 /* -------------------------------------------------------------------- types */
 
