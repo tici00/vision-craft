@@ -7,6 +7,7 @@
  * timeline, so every returned second refers to the original recording.
  */
 
+import { fetchMp3Chunk, type Mp3ChunkPlanEntry } from "./audioChunker.server";
 import { chatJson, type ContentPart } from "./gateway.server";
 import { fetchInlineMedia, type AudioChunk } from "./media.server";
 
