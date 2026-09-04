@@ -34,7 +34,24 @@ import {
   renderClips,
   type RenderClipRequest,
 } from "@/services/worker/workerClient.server";
-import { transcribeAudioChunks, transcribeDirectSource } from "./transcription.server";
+import {
+  transcribeAudioChunks,
+  transcribeDirectSource,
+  transcribeMp3Chunk,
+  type TranscriptSegment,
+} from "./transcription.server";
+import {
+  planMp3Chunks,
+  type Mp3ChunkPlan,
+  type Mp3ChunkPlanEntry,
+} from "./audioChunker.server";
+
+/** Language the user asked for, when transcription language is set manually. */
+function transcriptionLanguageHint(request: AnalysisJobRequest): string | null {
+  return request.language.mode === "manual"
+    ? (request.language.transcriptionLanguage ?? request.language.primary ?? null)
+    : null;
+}
 
 /* -------------------------------------------------------------------- types */
 
@@ -334,33 +351,229 @@ async function runExtractingAudio(job: Row): Promise<Row> {
     fileName: request.sourceVideo.fileName ?? "source.mp4",
   });
 
+  const audio = chunks[0];
+  if (!audio) throw new Error("O serviço de mídia não retornou o áudio extraído.");
+
+  // The worker returns ONE remote audio file of the whole recording. It is never
+  // downloaded as a whole: only its MP3 frame headers are streamed here to build
+  // a byte-range chunk plan, so each transcription request stays small.
+  let plan: Mp3ChunkPlan | null = null;
+  if (audio.format === "mp3") {
+    plan = await planMp3Chunks(audio.downloadUrl);
+  }
 
   await updateJob(job.id, {
-    // Chunk descriptors are kept on the job so transcription can resume.
+    // Audio descriptor is kept on the job so transcription can resume.
     request_payload: { ...request, audioChunks: chunks } as unknown as Row,
     worker_stage: "audio_extracted",
     worker_last_sync_at: new Date().toISOString(),
-    worker_payload: { chunks, durationSeconds } as unknown as Row,
+    worker_payload: {
+      chunks,
+      durationSeconds,
+      ...(plan ? { audioTotalBytes: plan.totalBytes, audioSeconds: plan.totalSeconds } : {}),
+    } as unknown as Row,
   });
+
+  // The transcription row is created up-front holding the real chunk plan; it is
+  // the single source of truth for what has already been transcribed.
+  await supabaseAdmin.from("transcriptions").upsert(
+    {
+      project_id: job.project_id,
+      job_id: job.id,
+      requested_language: transcriptionLanguageHint(request),
+      audio_url: audio.downloadUrl,
+      chunk_plan: (plan?.chunks ?? null) as unknown as Row,
+      chunk_count: plan?.chunks.length ?? null,
+      status: "pending",
+      error_message: null,
+      provider: "lovable-ai",
+      source_kind: "extracted_audio",
+      source_storage_path: storagePath,
+      duration_seconds: plan?.totalSeconds ?? durationSeconds,
+    },
+    { onConflict: "project_id,job_id" },
+  );
 
   return moveTo(job, "transcribing", {
     steps: { extracting_audio: "done" },
-    message: `Áudio extraído pelo serviço de mídia em ${chunks.length} trecho(s) interno(s)${
-      durationSeconds ? ` · ${Math.round(durationSeconds / 60)} min de mídia` : ""
-    }.`,
+    message: plan
+      ? `Áudio extraído e fatiado em ${plan.chunks.length} trecho(s) reais de até ~${Math.round(
+          (plan.chunks[0]?.durationSeconds ?? 0) / 60,
+        )} min (${Math.round(plan.totalSeconds / 60)} min de mídia).`
+      : `Áudio extraído pelo serviço de mídia${
+          durationSeconds ? ` · ${Math.round(durationSeconds / 60)} min de mídia` : ""
+        }.`,
   });
 }
 
+/** Chunks transcribed per `advanceJob` call, so progress is persisted often. */
+const TRANSCRIBE_CHUNKS_PER_CALL = 2;
+/** Retries for transient model/network failures on a single chunk. */
+const CHUNK_RETRIES = 2;
+
+function transcriptSegmentsOf(row: Row): TranscriptSegment[] {
+  return Array.isArray(row?.segments) ? (row.segments as TranscriptSegment[]) : [];
+}
+
+async function loadTranscriptionRow(job: Row): Promise<Row | null> {
+  const { data } = await supabaseAdmin
+    .from("transcriptions")
+    .select("*")
+    .eq("project_id", job.project_id)
+    .eq("job_id", job.id)
+    .maybeSingle();
+  return data ?? null;
+}
+
+/**
+ * Incremental, resumable transcription.
+ *
+ * When a real chunk plan exists, this stage transcribes only the chunks that are
+ * still missing (a couple per call), offsets their timestamps onto the original
+ * timeline, and persists the accumulated transcript plus the set of completed
+ * chunk indexes. A failure at chunk N never invalidates chunks 0..N-1, and a
+ * retry of an already-completed chunk is skipped, so no segment is duplicated.
+ */
 async function runTranscribing(job: Row): Promise<Row> {
   const payload = (await requestPayload(job)) as AnalysisJobRequest & {
     audioChunks?: Parameters<typeof transcribeAudioChunks>[0]["chunks"];
   };
   const storagePath = payload.sourceVideo.storagePath!;
-  const languageHint =
-    payload.language.mode === "manual"
-      ? (payload.language.transcriptionLanguage ?? payload.language.primary)
-      : null;
+  const languageHint = transcriptionLanguageHint(payload);
 
+  const row = await loadTranscriptionRow(job);
+  const plan = (row?.chunk_plan ?? null) as Mp3ChunkPlanEntry[] | null;
+
+  if (row && plan?.length && row.audio_url) {
+    const done = new Set<number>(
+      (Array.isArray(row.completed_chunks) ? row.completed_chunks : []) as number[],
+    );
+    const pending = plan.filter((chunk) => !done.has(chunk.index));
+
+    let segments = transcriptSegmentsOf(row);
+    let language: string | null = row.detected_language ?? null;
+    let processed = 0;
+
+    for (const chunk of pending.slice(0, TRANSCRIBE_CHUNKS_PER_CALL)) {
+      let lastError: unknown = null;
+      for (let attempt = 1; attempt <= CHUNK_RETRIES + 1; attempt += 1) {
+        try {
+          const result = await transcribeMp3Chunk({
+            audioUrl: row.audio_url as string,
+            chunk,
+            languageHint: languageHint ?? language,
+          });
+          language = language ?? result.language;
+          // Idempotent merge: drop anything previously stored for this range.
+          segments = [
+            ...segments.filter(
+              (segment) =>
+                segment.startSeconds < chunk.startSeconds ||
+                segment.startSeconds >= chunk.startSeconds + chunk.durationSeconds,
+            ),
+            ...result.segments,
+          ].sort((a, b) => a.startSeconds - b.startSeconds);
+          done.add(chunk.index);
+          processed += 1;
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt <= CHUNK_RETRIES) {
+            await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+          }
+        }
+      }
+
+      if (lastError) {
+        // Persist everything already transcribed before failing the stage.
+        await supabaseAdmin
+          .from("transcriptions")
+          .update({
+            segments: segments as unknown as Row,
+            text: segments.map((segment) => segment.text).join(" "),
+            completed_chunks: [...done].sort((a, b) => a - b),
+            detected_language: language,
+            language: languageHint ?? language,
+            status: "error",
+            error_message: lastError instanceof Error ? lastError.message : String(lastError),
+          })
+          .eq("id", row.id);
+        throw new Error(
+          `Falha ao transcrever o trecho ${chunk.index + 1}/${plan.length} do áudio: ${
+            lastError instanceof Error ? lastError.message : "erro desconhecido"
+          }. Os trechos já transcritos foram preservados; execute novamente para continuar.`,
+        );
+      }
+    }
+
+    const completed = [...done].sort((a, b) => a - b);
+    const allDone = completed.length >= plan.length;
+
+    await supabaseAdmin
+      .from("transcriptions")
+      .update({
+        segments: segments as unknown as Row,
+        text: segments.map((segment) => segment.text).join(" "),
+        completed_chunks: completed,
+        detected_language: language,
+        language: languageHint ?? language,
+        model: "google/gemini-3.6-flash",
+        status: allDone ? "completed" : "partial",
+        error_message: null,
+        duration_seconds: plan.reduce((sum, chunk) => sum + chunk.durationSeconds, 0),
+      })
+      .eq("id", row.id);
+
+    if (!allDone) {
+      // Real progress: fraction of chunks actually transcribed and persisted.
+      const fraction = completed.length / plan.length;
+      const progress = Math.round(20 + 34 * fraction);
+      const updated = await updateJob(job.id, {
+        stage: "transcribing",
+        status: "running",
+        progress,
+        current_step: STAGE_LABEL["transcribing"]!,
+        stage_message: `Transcrevendo o áudio: ${completed.length}/${plan.length} trecho(s) concluído(s).`,
+        logs: await appendLog(
+          job,
+          `Transcrição incremental: ${completed.length}/${plan.length} trecho(s) (+${processed}).`,
+        ),
+      });
+      await supabaseAdmin
+        .from("projects")
+        .update({ analysis_progress: progress, analysis_stage: "transcribing" })
+        .eq("id", job.project_id);
+      return updated;
+    }
+
+    if (segments.length === 0) {
+      throw new Error(
+        "Nenhuma fala foi encontrada no áudio do vídeo, portanto não é possível selecionar cortes por conteúdo falado.",
+      );
+    }
+
+    await supabaseAdmin
+      .from("projects")
+      .update({ detected_language: language })
+      .eq("id", job.project_id);
+
+    return moveTo(job, "scoring_segments", {
+      steps: {
+        detecting_language: "done",
+        transcribing: "done",
+        analyzing_audio: "done",
+        analyzing_video: "skipped",
+        combining_signals: "done",
+      },
+      message: `${segments.length} trecho(s) de fala transcrito(s) a partir de ${plan.length} trecho(s) de áudio${
+        language ? ` · idioma ${language}` : ""
+      }.`,
+    });
+  }
+
+  // Fallback paths: no byte-range plan (non-MP3 worker output, or no worker at
+  // all and a small source analysed directly by the model).
   const result = payload.audioChunks?.length
     ? await transcribeAudioChunks({ chunks: payload.audioChunks, languageHint })
     : await transcribeDirectSource({
@@ -376,28 +589,29 @@ async function runTranscribing(job: Row): Promise<Row> {
     );
   }
 
-  await supabaseAdmin.from("transcriptions").delete().eq("project_id", job.project_id);
-  await supabaseAdmin.from("transcriptions").insert({
-    project_id: job.project_id,
-    job_id: job.id,
-    requested_language: languageHint,
-    detected_language: result.language,
-    language: languageHint ?? result.language,
-    text: result.text,
-    segments: result.segments as unknown as Row,
-    provider: "lovable-ai",
-    model: "google/gemini-3.6-flash",
-    source_kind: payload.audioChunks?.length ? "extracted_audio" : "source_video",
-    source_storage_path: storagePath,
-    duration_seconds: result.transcribedSeconds,
-  });
+  await supabaseAdmin.from("transcriptions").upsert(
+    {
+      project_id: job.project_id,
+      job_id: job.id,
+      requested_language: languageHint,
+      detected_language: result.language,
+      language: languageHint ?? result.language,
+      text: result.text,
+      segments: result.segments as unknown as Row,
+      provider: "lovable-ai",
+      model: "google/gemini-3.6-flash",
+      source_kind: payload.audioChunks?.length ? "extracted_audio" : "source_video",
+      source_storage_path: storagePath,
+      duration_seconds: result.transcribedSeconds,
+      status: "completed",
+      error_message: null,
+    },
+    { onConflict: "project_id,job_id" },
+  );
 
   await supabaseAdmin
     .from("projects")
-    .update({
-      detected_language: result.language,
-      ...(payload.language.mode === "auto" ? {} : {}),
-    })
+    .update({ detected_language: result.language })
     .eq("id", job.project_id);
 
   return moveTo(job, "scoring_segments", {
@@ -405,7 +619,7 @@ async function runTranscribing(job: Row): Promise<Row> {
       detecting_language: "done",
       transcribing: "done",
       analyzing_audio: "done",
-      analyzing_video: payload.analysis.sources.includes("video") ? "skipped" : "skipped",
+      analyzing_video: "skipped",
       combining_signals: "done",
     },
     message: `${result.segments.length} trecho(s) de fala transcrito(s)${

@@ -7,6 +7,7 @@
  * timeline, so every returned second refers to the original recording.
  */
 
+import { fetchMp3Chunk, type Mp3ChunkPlanEntry } from "./audioChunker.server";
 import { chatJson, type ContentPart } from "./gateway.server";
 import { fetchInlineMedia, type AudioChunk } from "./media.server";
 
@@ -127,4 +128,26 @@ export async function transcribeAudioChunks(params: {
     text: all.map((segment) => segment.text).join(" "),
     transcribedSeconds,
   };
+}
+
+/**
+ * Transcribes ONE planned MP3 chunk of the remote audio produced by the worker.
+ *
+ * Only the bytes of that chunk are fetched (HTTP Range) and sent to the model,
+ * so the full multi-hour MP3 never reaches memory nor the model. Returned
+ * timestamps are already offset onto the original video timeline.
+ */
+export async function transcribeMp3Chunk(params: {
+  audioUrl: string;
+  chunk: Mp3ChunkPlanEntry;
+  languageHint: string | null;
+}): Promise<{ language: string | null; segments: TranscriptSegment[]; bytes: number }> {
+  const { data, bytes } = await fetchMp3Chunk(params.audioUrl, params.chunk);
+  const { language, segments } = await transcribeInline({
+    data,
+    format: "mp3",
+    offsetSeconds: params.chunk.startSeconds,
+    languageHint: params.languageHint,
+  });
+  return { language, segments, bytes };
 }
