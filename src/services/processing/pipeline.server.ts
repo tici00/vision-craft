@@ -334,20 +334,58 @@ async function runExtractingAudio(job: Row): Promise<Row> {
     fileName: request.sourceVideo.fileName ?? "source.mp4",
   });
 
+  const audio = chunks[0];
+  if (!audio) throw new Error("O serviço de mídia não retornou o áudio extraído.");
+
+  // The worker returns ONE remote audio file of the whole recording. It is never
+  // downloaded as a whole: only its MP3 frame headers are streamed here to build
+  // a byte-range chunk plan, so each transcription request stays small.
+  let plan: Mp3ChunkPlan | null = null;
+  if (audio.format === "mp3") {
+    plan = await planMp3Chunks(audio.downloadUrl);
+  }
 
   await updateJob(job.id, {
-    // Chunk descriptors are kept on the job so transcription can resume.
+    // Audio descriptor is kept on the job so transcription can resume.
     request_payload: { ...request, audioChunks: chunks } as unknown as Row,
     worker_stage: "audio_extracted",
     worker_last_sync_at: new Date().toISOString(),
-    worker_payload: { chunks, durationSeconds } as unknown as Row,
+    worker_payload: {
+      chunks,
+      durationSeconds,
+      ...(plan ? { audioTotalBytes: plan.totalBytes, audioSeconds: plan.totalSeconds } : {}),
+    } as unknown as Row,
   });
+
+  // The transcription row is created up-front holding the real chunk plan; it is
+  // the single source of truth for what has already been transcribed.
+  await supabaseAdmin.from("transcriptions").upsert(
+    {
+      project_id: job.project_id,
+      job_id: job.id,
+      requested_language: transcriptionLanguageHint(request),
+      audio_url: audio.downloadUrl,
+      chunk_plan: (plan?.chunks ?? null) as unknown as Row,
+      chunk_count: plan?.chunks.length ?? null,
+      status: "pending",
+      error_message: null,
+      provider: "lovable-ai",
+      source_kind: "extracted_audio",
+      source_storage_path: storagePath,
+      duration_seconds: plan?.totalSeconds ?? durationSeconds,
+    },
+    { onConflict: "project_id,job_id" },
+  );
 
   return moveTo(job, "transcribing", {
     steps: { extracting_audio: "done" },
-    message: `Áudio extraído pelo serviço de mídia em ${chunks.length} trecho(s) interno(s)${
-      durationSeconds ? ` · ${Math.round(durationSeconds / 60)} min de mídia` : ""
-    }.`,
+    message: plan
+      ? `Áudio extraído e fatiado em ${plan.chunks.length} trecho(s) reais de até ~${Math.round(
+          (plan.chunks[0]?.durationSeconds ?? 0) / 60,
+        )} min (${Math.round(plan.totalSeconds / 60)} min de mídia).`
+      : `Áudio extraído pelo serviço de mídia${
+          durationSeconds ? ` · ${Math.round(durationSeconds / 60)} min de mídia` : ""
+        }.`,
   });
 }
 
