@@ -15,6 +15,7 @@ import { Route as ProjectsProjectIdIndexRouteImport } from './routes/projects.$p
 import { Route as ProjectsProjectIdConfigureRouteImport } from './routes/projects.$projectId.configure'
 import { Route as ProjectsProjectIdProcessingRouteImport } from './routes/projects.$projectId.processing'
 import { Route as ProjectsProjectIdResultsRouteImport } from './routes/projects.$projectId.results'
+import { Route as ApiPublicHooksProcessJobsRouteImport } from './routes/api/public/hooks/process-jobs'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -49,6 +50,12 @@ const ProjectsProjectIdResultsRoute =
     path: '/projects/$projectId/results',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksProcessJobsRoute =
+  ApiPublicHooksProcessJobsRouteImport.update({
+    id: '/api/public/hooks/process-jobs',
+    path: '/api/public/hooks/process-jobs',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -57,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId/processing': typeof ProjectsProjectIdProcessingRoute
   '/projects/$projectId/results': typeof ProjectsProjectIdResultsRoute
   '/projects/$projectId/': typeof ProjectsProjectIdIndexRoute
+  '/api/public/hooks/process-jobs': typeof ApiPublicHooksProcessJobsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -65,6 +73,7 @@ export interface FileRoutesByTo {
   '/projects/$projectId/processing': typeof ProjectsProjectIdProcessingRoute
   '/projects/$projectId/results': typeof ProjectsProjectIdResultsRoute
   '/projects/$projectId': typeof ProjectsProjectIdIndexRoute
+  '/api/public/hooks/process-jobs': typeof ApiPublicHooksProcessJobsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -74,6 +83,7 @@ export interface FileRoutesById {
   '/projects/$projectId/processing': typeof ProjectsProjectIdProcessingRoute
   '/projects/$projectId/results': typeof ProjectsProjectIdResultsRoute
   '/projects/$projectId/': typeof ProjectsProjectIdIndexRoute
+  '/api/public/hooks/process-jobs': typeof ApiPublicHooksProcessJobsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -84,6 +94,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/processing'
     | '/projects/$projectId/results'
     | '/projects/$projectId/'
+    | '/api/public/hooks/process-jobs'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -92,6 +103,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/processing'
     | '/projects/$projectId/results'
     | '/projects/$projectId'
+    | '/api/public/hooks/process-jobs'
   id:
     | '__root__'
     | '/'
@@ -100,6 +112,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/processing'
     | '/projects/$projectId/results'
     | '/projects/$projectId/'
+    | '/api/public/hooks/process-jobs'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -109,6 +122,7 @@ export interface RootRouteChildren {
   ProjectsProjectIdProcessingRoute: typeof ProjectsProjectIdProcessingRoute
   ProjectsProjectIdResultsRoute: typeof ProjectsProjectIdResultsRoute
   ProjectsProjectIdIndexRoute: typeof ProjectsProjectIdIndexRoute
+  ApiPublicHooksProcessJobsRoute: typeof ApiPublicHooksProcessJobsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -155,6 +169,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectIdResultsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/process-jobs': {
+      id: '/api/public/hooks/process-jobs'
+      path: '/api/public/hooks/process-jobs'
+      fullPath: '/api/public/hooks/process-jobs'
+      preLoaderRoute: typeof ApiPublicHooksProcessJobsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -165,6 +186,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsProjectIdProcessingRoute: ProjectsProjectIdProcessingRoute,
   ProjectsProjectIdResultsRoute: ProjectsProjectIdResultsRoute,
   ProjectsProjectIdIndexRoute: ProjectsProjectIdIndexRoute,
+  ApiPublicHooksProcessJobsRoute: ApiPublicHooksProcessJobsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
