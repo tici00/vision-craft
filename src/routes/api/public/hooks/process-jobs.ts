@@ -14,7 +14,9 @@ export const Route = createFileRoute("/api/public/hooks/process-jobs")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const expected = process.env["VIDEO_WORKER_TOKEN"];
+        const expected =
+          process.env["RUNNER_CRON_TOKEN"] ?? process.env["VIDEO_WORKER_TOKEN"] ?? "";
+
         if (!expected) {
           return Response.json({ error: "Runner token não configurado." }, { status: 500 });
         }
