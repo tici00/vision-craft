@@ -45,7 +45,11 @@ function ProcessingPage() {
   const project = useQuery(projectQueries.detail(projectId));
   const job = useQuery({
     ...projectQueries.latestJob(projectId),
-    refetchInterval: 4000,
+    // Light polling, and it stops as soon as the job reaches a terminal state.
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 5000 : false;
+    },
   });
 
   const active = job.data?.status === "queued" || job.data?.status === "running";
@@ -60,25 +64,24 @@ function ProcessingPage() {
   }, [active]);
 
   /**
-   * Drives the real pipeline: each call executes one server-side stage and
-   * persists what actually happened. No progress is simulated here.
+   * The browser does NOT drive the pipeline. It only asks the backend to start
+   * (or resume) the job once; the backend runner plus the scheduled hook keep
+   * advancing it even if this tab is closed. Everything below is observation.
    */
-  const advancing = useRef(false);
+  const kicked = useRef<string | null>(null);
   useEffect(() => {
     const jobId = job.data?.id;
     if (!jobId || !active || job.data?.cancelRequested) return;
-    if (advancing.current) return;
-    advancing.current = true;
-    void advanceProcessing({ data: { jobId } })
+    if (kicked.current === jobId) return;
+    kicked.current = jobId;
+    void startProcessing({ data: { jobId } })
       .then(() => {
         void job.refetch();
         void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       })
-      .catch((error: Error) => toast.error(error.message))
-      .finally(() => {
-        advancing.current = false;
-      });
-  }, [job.data?.id, job.data?.stage, job.data?.status, active, job.data?.cancelRequested]);
+      .catch((error: Error) => toast.error(error.message));
+  }, [job.data?.id, active, job.data?.cancelRequested]);
+
 
   useEffect(() => {
     if (job.data?.status === "completed") {
