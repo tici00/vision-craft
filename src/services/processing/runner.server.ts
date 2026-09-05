@@ -100,7 +100,19 @@ export async function runJob(jobId: string): Promise<RunResult> {
     if (Date.now() >= deadline) break;
   }
 
+  // Budget spent but work remains: release the lease so the next sweep resumes
+  // immediately instead of waiting for the lease to expire.
+  await releaseLease(jobId);
   return { jobId, claimed: true, steps, snapshot, reason: "budget" };
+}
+
+/** Clears the lease so another invocation can continue the job right away. */
+async function releaseLease(jobId: string): Promise<void> {
+  await supabaseAdmin
+    .from("processing_jobs")
+    .update({ last_heartbeat_at: null })
+    .eq("id", jobId)
+    .in("status", ["queued", "running"]);
 }
 
 /**
