@@ -106,6 +106,34 @@ function normalizeWorkerUrl(url: string): string {
   return url.startsWith("http://") ? `https://${url.slice("http://".length)}` : url;
 }
 
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "unknown-host";
+  }
+}
+
+/**
+ * Structured, secret-free diagnostics for a failed transfer. Never includes
+ * tokens, headers, signed URLs or query strings — only host, path and metrics.
+ */
+function logTransferFailure(fields: Record<string, unknown>): void {
+  console.error(`[worker-transfer-failure] ${JSON.stringify(fields)}`);
+}
+
+function errorShape(error: unknown): Record<string, unknown> {
+  const err = error as { name?: string; message?: string; cause?: unknown } | null;
+  const cause = err?.cause as { code?: string; name?: string; message?: string } | undefined;
+  return {
+    errorName: err?.name ?? "unknown",
+    errorMessage: err?.message ?? "unknown",
+    ...(cause
+      ? { causeCode: cause.code ?? null, causeName: cause.name ?? null }
+      : { causeCode: null }),
+  };
+}
+
 interface RequestOptions {
   method?: "GET" | "POST";
   timeoutMs?: number;
@@ -113,7 +141,12 @@ interface RequestOptions {
   /** Streaming multipart body (used for the video uploads). */
   body?: BodyInit;
   contentType?: string;
+  /** Secret-free context added to failure diagnostics. */
+  diagnostics?: Record<string, unknown>;
+  /** Returns how many payload bytes were streamed so far (upload progress). */
+  bytesSent?: () => number;
 }
+
 
 /** Single entry point for every worker HTTP call. */
 export async function workerRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
