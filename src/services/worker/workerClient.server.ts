@@ -475,7 +475,7 @@ export async function renderClips(params: RenderClipsParams): Promise<RenderClip
   if (params.clips.length === 0) return [];
 
   const source = await openSourceStream(params.sourceUrl);
-  const { body, contentType } = multipartStream(
+  const { body, contentType, bytesSent } = multipartStream(
     {
       clips: JSON.stringify(
         params.clips.map((clip) => ({
@@ -497,7 +497,13 @@ export async function renderClips(params: RenderClipsParams): Promise<RenderClip
     ok?: boolean;
     error?: string;
     clips?: { id?: string; start?: number; end?: number; url?: string; error?: string }[];
-  }>("/render-clips", { body, contentType });
+  }>("/render-clips", {
+    body,
+    contentType,
+    bytesSent,
+    diagnostics: { stage: "render-clips", clipCount: params.clips.length },
+  });
+
 
   if (payload.ok === false) {
     throw new WorkerError(502, "/render-clips", payload.error ?? "Falha ao renderizar os cortes.");
