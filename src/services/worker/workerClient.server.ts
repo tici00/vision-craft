@@ -410,7 +410,7 @@ export interface ExtractAudioResult {
  */
 export async function extractAudio(params: ExtractAudioParams): Promise<ExtractAudioResult> {
   const source = await openSourceStream(params.sourceUrl);
-  const { body, contentType } = multipartStream(
+  const { body, contentType, bytesSent, sourceError } = multipartStream(
     {},
     {
       field: "video",
@@ -420,17 +420,38 @@ export async function extractAudio(params: ExtractAudioParams): Promise<ExtractA
     },
   );
 
-  const payload = await workerRequest<{
+  let payload: {
     ok?: boolean;
     error?: string;
     audioId?: string;
     audioUrl?: string;
     durationSeconds?: number | null;
-  }>("/extract-audio", { body, contentType });
+  };
+  try {
+    payload = await workerRequest("/extract-audio", {
+      body,
+      contentType,
+      bytesSent,
+      diagnostics: { stage: "extract-audio", sourceSizeBytes: source.sizeBytes },
+    });
+  } catch (error) {
+    // Attribute the failure honestly: a broken storage download is not a worker fault.
+    if (sourceError()) {
+      throw new WorkerError(
+        0,
+        "storage",
+        `A leitura do vídeo de origem no armazenamento foi interrompida após ${Math.round(
+          bytesSent() / 1_000_000,
+        )} MB, antes de o serviço de mídia poder concluir a extração.`,
+      );
+    }
+    throw error;
+  }
 
   if (payload.ok === false || !payload.audioUrl) {
     throw new WorkerError(502, "/extract-audio", payload.error ?? "Falha ao extrair o áudio.");
   }
+
 
   return {
     chunks: [
