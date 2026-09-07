@@ -106,6 +106,34 @@ function normalizeWorkerUrl(url: string): string {
   return url.startsWith("http://") ? `https://${url.slice("http://".length)}` : url;
 }
 
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "unknown-host";
+  }
+}
+
+/**
+ * Structured, secret-free diagnostics for a failed transfer. Never includes
+ * tokens, headers, signed URLs or query strings — only host, path and metrics.
+ */
+function logTransferFailure(fields: Record<string, unknown>): void {
+  console.error(`[worker-transfer-failure] ${JSON.stringify(fields)}`);
+}
+
+function errorShape(error: unknown): Record<string, unknown> {
+  const err = error as { name?: string; message?: string; cause?: unknown } | null;
+  const cause = err?.cause as { code?: string; name?: string; message?: string } | undefined;
+  return {
+    errorName: err?.name ?? "unknown",
+    errorMessage: err?.message ?? "unknown",
+    ...(cause
+      ? { causeCode: cause.code ?? null, causeName: cause.name ?? null }
+      : { causeCode: null }),
+  };
+}
+
 interface RequestOptions {
   method?: "GET" | "POST";
   timeoutMs?: number;
@@ -113,7 +141,12 @@ interface RequestOptions {
   /** Streaming multipart body (used for the video uploads). */
   body?: BodyInit;
   contentType?: string;
+  /** Secret-free context added to failure diagnostics. */
+  diagnostics?: Record<string, unknown>;
+  /** Returns how many payload bytes were streamed so far (upload progress). */
+  bytesSent?: () => number;
 }
+
 
 /** Single entry point for every worker HTTP call. */
 export async function workerRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -129,6 +162,7 @@ export async function workerRequest<T>(path: string, options: RequestOptions = {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const startedAt = Date.now();
     try {
       const response = await fetch(`${config.url}${path}`, {
         method,
@@ -151,6 +185,15 @@ export async function workerRequest<T>(path: string, options: RequestOptions = {
           path,
           friendlyMessage(response.status, path, text),
         );
+        logTransferFailure({
+          path,
+          host: safeHost(config.url),
+          attempt,
+          elapsedMs: Date.now() - startedAt,
+          httpStatus: response.status,
+          bytesSent: options.bytesSent?.() ?? null,
+          ...(options.diagnostics ?? {}),
+        });
         if (COLD_START_STATUSES.has(response.status) && attempt < maxAttempts) {
           lastError = error;
           await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
@@ -171,14 +214,32 @@ export async function workerRequest<T>(path: string, options: RequestOptions = {
     } catch (error) {
       if (error instanceof WorkerError) throw error;
       const aborted = error instanceof Error && error.name === "AbortError";
+      const elapsedMs = Date.now() - startedAt;
+      const sent = options.bytesSent?.() ?? null;
+      logTransferFailure({
+        path,
+        host: safeHost(config.url),
+        attempt,
+        elapsedMs,
+        httpStatus: null,
+        bytesSent: sent,
+        streamedBody: streaming,
+        aborted,
+        ...errorShape(error),
+        ...(options.diagnostics ?? {}),
+      });
+      const transferNote =
+        sent != null
+          ? ` Transferidos ${Math.round(sent / 1_000_000)} MB em ${Math.round(elapsedMs / 1000)}s antes da queda.`
+          : "";
       const networkError = new WorkerError(
         0,
         path,
         aborted
-          ? `O serviço de mídia não respondeu em ${Math.round(timeoutMs / 1000)}s em ${path}.`
+          ? `O serviço de mídia não respondeu em ${Math.round(timeoutMs / 1000)}s em ${path}.${transferNote}`
           : `Não foi possível alcançar o serviço de mídia em ${path}: ${
               error instanceof Error ? error.message : "erro de rede"
-            }`,
+            }.${transferNote}`,
       );
       if (attempt < maxAttempts && !aborted) {
         lastError = networkError;
@@ -211,9 +272,18 @@ interface MultipartFile {
 function multipartStream(
   fields: Record<string, string>,
   file: MultipartFile,
-): { body: ReadableStream<Uint8Array>; contentType: string } {
+): {
+  body: ReadableStream<Uint8Array>;
+  contentType: string;
+  /** Payload bytes handed to the outgoing request so far. */
+  bytesSent: () => number;
+  /** Set when the storage read (not the worker) is what broke. */
+  sourceError: () => unknown;
+} {
   const boundary = `----visioncraft${crypto.randomUUID().replace(/-/g, "")}`;
   const encoder = new TextEncoder();
+  let sent = 0;
+  let sourceError: unknown = null;
 
   let head = "";
   for (const [name, value] of Object.entries(fields)) {
@@ -232,8 +302,23 @@ function multipartStream(
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (value) controller.enqueue(value);
+          if (value) {
+            sent += value.byteLength;
+            controller.enqueue(value);
+          }
         }
+      } catch (error) {
+        // The storage download died mid-transfer: record it so the failure is
+        // attributed to storage instead of the media service.
+        sourceError = error;
+        logTransferFailure({
+          path: "storage-read",
+          host: "storage",
+          bytesSent: sent,
+          ...errorShape(error),
+        });
+        controller.error(error);
+        return;
       } finally {
         reader.releaseLock();
       }
@@ -242,13 +327,32 @@ function multipartStream(
     },
   });
 
-  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+  return {
+    body,
+    contentType: `multipart/form-data; boundary=${boundary}`,
+    bytesSent: () => sent,
+    sourceError: () => sourceError,
+  };
 }
 
 async function openSourceStream(
   sourceUrl: string,
-): Promise<{ stream: ReadableStream<Uint8Array>; contentType: string }> {
-  const response = await fetch(sourceUrl);
+): Promise<{
+  stream: ReadableStream<Uint8Array>;
+  contentType: string;
+  sizeBytes: number | null;
+}> {
+  let response: Response;
+  try {
+    response = await fetch(sourceUrl);
+  } catch (error) {
+    logTransferFailure({ path: "storage-open", host: safeHost(sourceUrl), ...errorShape(error) });
+    throw new WorkerError(
+      0,
+      "storage",
+      "Não foi possível iniciar a leitura do vídeo de origem no armazenamento.",
+    );
+  }
   if (!response.ok || !response.body) {
     throw new WorkerError(
       response.status || 0,
@@ -256,11 +360,14 @@ async function openSourceStream(
       `Não foi possível ler o vídeo de origem para enviar ao serviço de mídia (${response.status}).`,
     );
   }
+  const length = Number(response.headers.get("content-length") ?? "");
   return {
     stream: response.body as ReadableStream<Uint8Array>,
     contentType: response.headers.get("content-type") ?? "video/mp4",
+    sizeBytes: Number.isFinite(length) && length > 0 ? length : null,
   };
 }
+
 
 /* ----------------------------------------------------------------- endpoints */
 
@@ -303,7 +410,7 @@ export interface ExtractAudioResult {
  */
 export async function extractAudio(params: ExtractAudioParams): Promise<ExtractAudioResult> {
   const source = await openSourceStream(params.sourceUrl);
-  const { body, contentType } = multipartStream(
+  const { body, contentType, bytesSent, sourceError } = multipartStream(
     {},
     {
       field: "video",
@@ -313,17 +420,38 @@ export async function extractAudio(params: ExtractAudioParams): Promise<ExtractA
     },
   );
 
-  const payload = await workerRequest<{
+  let payload: {
     ok?: boolean;
     error?: string;
     audioId?: string;
     audioUrl?: string;
     durationSeconds?: number | null;
-  }>("/extract-audio", { body, contentType });
+  };
+  try {
+    payload = await workerRequest("/extract-audio", {
+      body,
+      contentType,
+      bytesSent,
+      diagnostics: { stage: "extract-audio", sourceSizeBytes: source.sizeBytes },
+    });
+  } catch (error) {
+    // Attribute the failure honestly: a broken storage download is not a worker fault.
+    if (sourceError()) {
+      throw new WorkerError(
+        0,
+        "storage",
+        `A leitura do vídeo de origem no armazenamento foi interrompida após ${Math.round(
+          bytesSent() / 1_000_000,
+        )} MB, antes de o serviço de mídia poder concluir a extração.`,
+      );
+    }
+    throw error;
+  }
 
   if (payload.ok === false || !payload.audioUrl) {
     throw new WorkerError(502, "/extract-audio", payload.error ?? "Falha ao extrair o áudio.");
   }
+
 
   return {
     chunks: [
@@ -347,7 +475,7 @@ export async function renderClips(params: RenderClipsParams): Promise<RenderClip
   if (params.clips.length === 0) return [];
 
   const source = await openSourceStream(params.sourceUrl);
-  const { body, contentType } = multipartStream(
+  const { body, contentType, bytesSent } = multipartStream(
     {
       clips: JSON.stringify(
         params.clips.map((clip) => ({
@@ -369,7 +497,13 @@ export async function renderClips(params: RenderClipsParams): Promise<RenderClip
     ok?: boolean;
     error?: string;
     clips?: { id?: string; start?: number; end?: number; url?: string; error?: string }[];
-  }>("/render-clips", { body, contentType });
+  }>("/render-clips", {
+    body,
+    contentType,
+    bytesSent,
+    diagnostics: { stage: "render-clips", clipCount: params.clips.length },
+  });
+
 
   if (payload.ok === false) {
     throw new WorkerError(502, "/render-clips", payload.error ?? "Falha ao renderizar os cortes.");
