@@ -162,6 +162,7 @@ export async function workerRequest<T>(path: string, options: RequestOptions = {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const startedAt = Date.now();
     try {
       const response = await fetch(`${config.url}${path}`, {
         method,
@@ -184,6 +185,15 @@ export async function workerRequest<T>(path: string, options: RequestOptions = {
           path,
           friendlyMessage(response.status, path, text),
         );
+        logTransferFailure({
+          path,
+          host: safeHost(config.url),
+          attempt,
+          elapsedMs: Date.now() - startedAt,
+          httpStatus: response.status,
+          bytesSent: options.bytesSent?.() ?? null,
+          ...(options.diagnostics ?? {}),
+        });
         if (COLD_START_STATUSES.has(response.status) && attempt < maxAttempts) {
           lastError = error;
           await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
@@ -204,14 +214,32 @@ export async function workerRequest<T>(path: string, options: RequestOptions = {
     } catch (error) {
       if (error instanceof WorkerError) throw error;
       const aborted = error instanceof Error && error.name === "AbortError";
+      const elapsedMs = Date.now() - startedAt;
+      const sent = options.bytesSent?.() ?? null;
+      logTransferFailure({
+        path,
+        host: safeHost(config.url),
+        attempt,
+        elapsedMs,
+        httpStatus: null,
+        bytesSent: sent,
+        streamedBody: streaming,
+        aborted,
+        ...errorShape(error),
+        ...(options.diagnostics ?? {}),
+      });
+      const transferNote =
+        sent != null
+          ? ` Transferidos ${Math.round(sent / 1_000_000)} MB em ${Math.round(elapsedMs / 1000)}s antes da queda.`
+          : "";
       const networkError = new WorkerError(
         0,
         path,
         aborted
-          ? `O serviço de mídia não respondeu em ${Math.round(timeoutMs / 1000)}s em ${path}.`
+          ? `O serviço de mídia não respondeu em ${Math.round(timeoutMs / 1000)}s em ${path}.${transferNote}`
           : `Não foi possível alcançar o serviço de mídia em ${path}: ${
               error instanceof Error ? error.message : "erro de rede"
-            }`,
+            }.${transferNote}`,
       );
       if (attempt < maxAttempts && !aborted) {
         lastError = networkError;
@@ -219,6 +247,11 @@ export async function workerRequest<T>(path: string, options: RequestOptions = {
         continue;
       }
       throw networkError;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
     } finally {
       clearTimeout(timer);
     }
