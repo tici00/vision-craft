@@ -252,11 +252,6 @@ export async function workerRequest<T>(path: string, options: RequestOptions = {
     }
   }
 
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
   throw lastError ?? new WorkerError(0, path, `Falha ao chamar o serviço de mídia em ${path}.`);
 }
 
