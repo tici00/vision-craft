@@ -272,9 +272,18 @@ interface MultipartFile {
 function multipartStream(
   fields: Record<string, string>,
   file: MultipartFile,
-): { body: ReadableStream<Uint8Array>; contentType: string } {
+): {
+  body: ReadableStream<Uint8Array>;
+  contentType: string;
+  /** Payload bytes handed to the outgoing request so far. */
+  bytesSent: () => number;
+  /** Set when the storage read (not the worker) is what broke. */
+  sourceError: () => unknown;
+} {
   const boundary = `----visioncraft${crypto.randomUUID().replace(/-/g, "")}`;
   const encoder = new TextEncoder();
+  let sent = 0;
+  let sourceError: unknown = null;
 
   let head = "";
   for (const [name, value] of Object.entries(fields)) {
@@ -293,8 +302,23 @@ function multipartStream(
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (value) controller.enqueue(value);
+          if (value) {
+            sent += value.byteLength;
+            controller.enqueue(value);
+          }
         }
+      } catch (error) {
+        // The storage download died mid-transfer: record it so the failure is
+        // attributed to storage instead of the media service.
+        sourceError = error;
+        logTransferFailure({
+          path: "storage-read",
+          host: "storage",
+          bytesSent: sent,
+          ...errorShape(error),
+        });
+        controller.error(error);
+        return;
       } finally {
         reader.releaseLock();
       }
@@ -303,13 +327,32 @@ function multipartStream(
     },
   });
 
-  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+  return {
+    body,
+    contentType: `multipart/form-data; boundary=${boundary}`,
+    bytesSent: () => sent,
+    sourceError: () => sourceError,
+  };
 }
 
 async function openSourceStream(
   sourceUrl: string,
-): Promise<{ stream: ReadableStream<Uint8Array>; contentType: string }> {
-  const response = await fetch(sourceUrl);
+): Promise<{
+  stream: ReadableStream<Uint8Array>;
+  contentType: string;
+  sizeBytes: number | null;
+}> {
+  let response: Response;
+  try {
+    response = await fetch(sourceUrl);
+  } catch (error) {
+    logTransferFailure({ path: "storage-open", host: safeHost(sourceUrl), ...errorShape(error) });
+    throw new WorkerError(
+      0,
+      "storage",
+      "Não foi possível iniciar a leitura do vídeo de origem no armazenamento.",
+    );
+  }
   if (!response.ok || !response.body) {
     throw new WorkerError(
       response.status || 0,
@@ -317,11 +360,14 @@ async function openSourceStream(
       `Não foi possível ler o vídeo de origem para enviar ao serviço de mídia (${response.status}).`,
     );
   }
+  const length = Number(response.headers.get("content-length") ?? "");
   return {
     stream: response.body as ReadableStream<Uint8Array>,
     contentType: response.headers.get("content-type") ?? "video/mp4",
+    sizeBytes: Number.isFinite(length) && length > 0 ? length : null,
   };
 }
+
 
 /* ----------------------------------------------------------------- endpoints */
 
