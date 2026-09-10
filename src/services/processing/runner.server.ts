@@ -29,7 +29,7 @@ export const LEASE_STALE_MS = 90_000;
  * still pending — that is what keeps the edge invocation alive. The budget must
  * therefore stay comfortably below the scheduler's own request timeout (55s).
  */
-export const RUN_BUDGET_MS = 45_000;
+export const RUN_BUDGET_MS = 30_000;
 /** Hard cap on stage advances per invocation (defensive, avoids hot loops). */
 const MAX_STEPS_PER_RUN = 40;
 /** Jobs picked up per sweep. */
