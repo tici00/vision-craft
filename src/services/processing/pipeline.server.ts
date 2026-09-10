@@ -450,7 +450,52 @@ async function runTranscribing(job: Row): Promise<Row> {
   const languageHint = transcriptionLanguageHint(payload);
 
   const row = await loadTranscriptionRow(job);
-  const plan = (row?.chunk_plan ?? null) as Mp3ChunkPlanEntry[] | null;
+  let plan = (row?.chunk_plan ?? null) as Mp3ChunkPlanEntry[] | null;
+  let attempts: Record<string, number> =
+    row?.chunk_attempts && typeof row.chunk_attempts === "object"
+      ? { ...(row.chunk_attempts as Record<string, number>) }
+      : {};
+
+  // A plan made of oversized chunks cannot finish inside one server execution:
+  // the execution is cut off mid-chunk and the next one restarts the same chunk
+  // with nothing persisted. Re-slice it — only while nothing has been
+  // transcribed yet, so persisted progress is never discarded.
+  if (row && plan?.length && row.audio_url) {
+    const doneCount = Array.isArray(row.completed_chunks)
+      ? (row.completed_chunks as number[]).length
+      : 0;
+    const oversized = plan.some(
+      (chunk) =>
+        chunk.durationSeconds > DEFAULT_CHUNK_MAX_SECONDS * 1.25 ||
+        chunk.byteEnd - chunk.byteStart + 1 > DEFAULT_CHUNK_TARGET_BYTES * 1.25,
+    );
+    if (oversized && doneCount === 0) {
+      const replanned = await planMp3Chunks(row.audio_url as string);
+      plan = replanned.chunks;
+      attempts = {};
+      await supabaseAdmin
+        .from("transcriptions")
+        .update({
+          chunk_plan: plan as unknown as Row,
+          chunk_count: plan.length,
+          plan_version: Number(row.plan_version ?? 1) + 1,
+          chunk_attempts: {} as unknown as Row,
+          active_chunk_index: null,
+          status: "pending",
+          error_message: null,
+          duration_seconds: replanned.totalSeconds,
+        })
+        .eq("id", row.id);
+      job = await updateJob(job.id, {
+        logs: await appendLog(
+          job,
+          `Plano de áudio refeito: ${plan.length} trecho(s) de até ${Math.round(
+            DEFAULT_CHUNK_MAX_SECONDS / 60,
+          )} min, para cada trecho caber em uma única execução.`,
+        ),
+      });
+    }
+  }
 
   if (row && plan?.length && row.audio_url) {
     const done = new Set<number>(
@@ -462,7 +507,49 @@ async function runTranscribing(job: Row): Promise<Row> {
     let language: string | null = row.detected_language ?? null;
     let processed = 0;
 
+    const persistTranscript = async (extra: Record<string, unknown>) => {
+      await supabaseAdmin
+        .from("transcriptions")
+        .update({
+          segments: segments as unknown as Row,
+          text: segments.map((segment) => segment.text).join(" "),
+          completed_chunks: [...done].sort((a, b) => a - b),
+          detected_language: language,
+          language: languageHint ?? language,
+          model: "google/gemini-3.6-flash",
+          chunk_attempts: attempts as unknown as Row,
+          duration_seconds: plan!.reduce((sum, chunk) => sum + chunk.durationSeconds, 0),
+          ...extra,
+        })
+        .eq("id", row.id);
+    };
+
     for (const chunk of pending.slice(0, TRANSCRIBE_CHUNKS_PER_CALL)) {
+      const key = String(chunk.index);
+      const priorAttempts = Number(attempts[key] ?? 0);
+
+      if (priorAttempts >= MAX_CHUNK_ATTEMPTS) {
+        await persistTranscript({
+          status: "error",
+          active_chunk_index: chunk.index,
+          error_message: `O trecho ${chunk.index + 1}/${plan.length} do áudio falhou em ${priorAttempts} tentativa(s) sem concluir.`,
+        });
+        throw new Error(
+          `O trecho ${chunk.index + 1}/${plan.length} do áudio não concluiu após ${priorAttempts} tentativa(s). Os trechos já transcritos foram preservados.`,
+        );
+      }
+
+      // The attempt is counted and persisted BEFORE the model call, so an
+      // execution that is killed mid-chunk leaves a visible record instead of
+      // silently restarting the same chunk forever.
+      attempts[key] = priorAttempts + 1;
+      await persistTranscript({
+        status: "running",
+        active_chunk_index: chunk.index,
+        last_chunk_started_at: new Date().toISOString(),
+        error_message: null,
+      });
+
       let lastError: unknown = null;
       for (let attempt = 1; attempt <= CHUNK_RETRIES + 1; attempt += 1) {
         try {
@@ -495,43 +582,30 @@ async function runTranscribing(job: Row): Promise<Row> {
 
       if (lastError) {
         // Persist everything already transcribed before failing the stage.
-        await supabaseAdmin
-          .from("transcriptions")
-          .update({
-            segments: segments as unknown as Row,
-            text: segments.map((segment) => segment.text).join(" "),
-            completed_chunks: [...done].sort((a, b) => a - b),
-            detected_language: language,
-            language: languageHint ?? language,
-            status: "error",
-            error_message: lastError instanceof Error ? lastError.message : String(lastError),
-          })
-          .eq("id", row.id);
+        await persistTranscript({
+          status: "error",
+          active_chunk_index: chunk.index,
+          error_message: lastError instanceof Error ? lastError.message : String(lastError),
+        });
         throw new Error(
           `Falha ao transcrever o trecho ${chunk.index + 1}/${plan.length} do áudio: ${
             lastError instanceof Error ? lastError.message : "erro desconhecido"
           }. Os trechos já transcritos foram preservados; execute novamente para continuar.`,
         );
       }
+
+      // Success is persisted immediately, chunk by chunk: the next execution
+      // resumes at the next pending chunk and never repeats this one.
+      await persistTranscript({
+        status: done.size >= plan.length ? "completed" : "partial",
+        active_chunk_index: null,
+        error_message: null,
+      });
     }
 
     const completed = [...done].sort((a, b) => a - b);
     const allDone = completed.length >= plan.length;
 
-    await supabaseAdmin
-      .from("transcriptions")
-      .update({
-        segments: segments as unknown as Row,
-        text: segments.map((segment) => segment.text).join(" "),
-        completed_chunks: completed,
-        detected_language: language,
-        language: languageHint ?? language,
-        model: "google/gemini-3.6-flash",
-        status: allDone ? "completed" : "partial",
-        error_message: null,
-        duration_seconds: plan.reduce((sum, chunk) => sum + chunk.durationSeconds, 0),
-      })
-      .eq("id", row.id);
 
     if (!allDone) {
       // Real progress: fraction of chunks actually transcribed and persisted.
