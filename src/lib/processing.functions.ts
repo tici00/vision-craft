@@ -6,7 +6,15 @@ import { createServerFn } from "@tanstack/react-start";
  * Execution lives entirely on the backend: `startProcessing` kicks a job off and
  * the scheduled hook (`/api/public/hooks/process-jobs`) keeps advancing it, so
  * the browser only creates the job and polls its persisted state.
+ *
+ * The first run is awaited on purpose. Detaching it (`waitUntil`) made the
+ * invocation return immediately and the work was dropped, leaving jobs without
+ * heartbeat. Since every stage persists its own state, closing the tab mid-run
+ * is safe: the scheduled sweep resumes from the next pending unit of work.
  */
+
+/** Kept short so the initial browser call returns quickly; the sweep continues. */
+const KICKOFF_BUDGET_MS = 15_000;
 
 export const startProcessing = createServerFn({ method: "POST" })
   .inputValidator((input: { jobId: string }) => {
@@ -16,19 +24,8 @@ export const startProcessing = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     const { runJob } = await import("@/services/processing/runner.server");
-    const { runDetached } = await import("@/lib/execution-context.server");
 
-    // The run must not be tied to this browser request: on the edge runtime a
-    // disconnected client cancels the invocation, which would kill the in-flight
-    // upload to the media service in the middle of a stage. When the runtime
-    // exposes `waitUntil`, the run continues in the background and the tab only
-    // polls the persisted job state; otherwise (dev/node) we await as before.
-    const detached = runDetached(null, () => runJob(data.jobId));
-    if (detached) {
-      return { jobId: data.jobId, claimed: true, steps: 0, reason: "detached", snapshot: null };
-    }
-
-    const result = await runJob(data.jobId);
+    const result = await runJob(data.jobId, KICKOFF_BUDGET_MS);
     return {
       jobId: result.jobId,
       claimed: result.claimed,
@@ -48,7 +45,6 @@ export const getProcessingCapabilities = createServerFn({ method: "GET" }).handl
   const { getCapabilities } = await import("@/services/processing/pipeline.server");
   return getCapabilities();
 });
-
 
 export const getClipPlaybackUrl = createServerFn({ method: "POST" })
   .inputValidator((input: { storagePath: string }) => ({ storagePath: input.storagePath }))

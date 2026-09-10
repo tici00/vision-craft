@@ -141,7 +141,12 @@ export async function sweepJobs(budgetMs = RUN_BUDGET_MS): Promise<RunResult[]> 
 
   const results: RunResult[] = [];
   for (const job of data ?? []) {
-    results.push(await runJob(job.id));
+    const remaining = deadline - Date.now();
+    // Never start another job without real time left: the shared budget keeps
+    // the whole sweep inside the scheduler request that is holding this
+    // invocation alive.
+    if (remaining < 5_000) break;
+    results.push(await runJob(job.id, remaining));
   }
   return results;
 }
