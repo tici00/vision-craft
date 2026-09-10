@@ -16,12 +16,24 @@ export const startProcessing = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     const { runJob } = await import("@/services/processing/runner.server");
+    const { runDetached } = await import("@/lib/execution-context.server");
+
+    // The run must not be tied to this browser request: on the edge runtime a
+    // disconnected client cancels the invocation, which would kill the in-flight
+    // upload to the media service in the middle of a stage. When the runtime
+    // exposes `waitUntil`, the run continues in the background and the tab only
+    // polls the persisted job state; otherwise (dev/node) we await as before.
+    const detached = runDetached(null, () => runJob(data.jobId));
+    if (detached) {
+      return { jobId: data.jobId, claimed: true, steps: 0, reason: "detached", snapshot: null };
+    }
+
     const result = await runJob(data.jobId);
     return {
       jobId: result.jobId,
       claimed: result.claimed,
       steps: result.steps,
-      reason: result.reason,
+      reason: result.reason as string,
       snapshot: result.snapshot,
     };
   });
