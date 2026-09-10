@@ -93,6 +93,14 @@ function id3Size(bytes: Uint8Array): number {
   return size + 10;
 }
 
+/**
+ * A chunk must be small enough that fetching it and transcribing it both fit in
+ * ONE server execution. Larger chunks were being cut off mid-flight, which made
+ * the stage restart the same chunk forever.
+ */
+export const DEFAULT_CHUNK_TARGET_BYTES = 3 * 1024 * 1024;
+export const DEFAULT_CHUNK_MAX_SECONDS = 4 * 60;
+
 export interface Mp3PlanOptions {
   /** Upper bound of a single chunk in bytes (keeps the inline payload valid). */
   targetBytes?: number;
@@ -109,8 +117,8 @@ export async function planMp3Chunks(
   url: string,
   options: Mp3PlanOptions = {},
 ): Promise<Mp3ChunkPlan> {
-  const targetBytes = options.targetBytes ?? 10 * 1024 * 1024;
-  const maxSeconds = options.maxSeconds ?? 15 * 60;
+  const targetBytes = options.targetBytes ?? DEFAULT_CHUNK_TARGET_BYTES;
+  const maxSeconds = options.maxSeconds ?? DEFAULT_CHUNK_MAX_SECONDS;
 
   const response = await fetch(url);
   if (!response.ok || !response.body) {

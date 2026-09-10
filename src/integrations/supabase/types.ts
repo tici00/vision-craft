@@ -1084,7 +1084,9 @@ export type Database = {
       }
       transcriptions: {
         Row: {
+          active_chunk_index: number | null
           audio_url: string | null
+          chunk_attempts: Json
           chunk_count: number | null
           chunk_plan: Json | null
           completed_chunks: number[]
@@ -1095,7 +1097,9 @@ export type Database = {
           id: string
           job_id: string | null
           language: string | null
+          last_chunk_started_at: string | null
           model: string | null
+          plan_version: number
           project_id: string
           provider: string | null
           requested_language: string | null
@@ -1107,7 +1111,9 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          active_chunk_index?: number | null
           audio_url?: string | null
+          chunk_attempts?: Json
           chunk_count?: number | null
           chunk_plan?: Json | null
           completed_chunks?: number[]
@@ -1118,7 +1124,9 @@ export type Database = {
           id?: string
           job_id?: string | null
           language?: string | null
+          last_chunk_started_at?: string | null
           model?: string | null
+          plan_version?: number
           project_id: string
           provider?: string | null
           requested_language?: string | null
@@ -1130,7 +1138,9 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          active_chunk_index?: number | null
           audio_url?: string | null
+          chunk_attempts?: Json
           chunk_count?: number | null
           chunk_plan?: Json | null
           completed_chunks?: number[]
@@ -1141,7 +1151,9 @@ export type Database = {
           id?: string
           job_id?: string | null
           language?: string | null
+          last_chunk_started_at?: string | null
           model?: string | null
+          plan_version?: number
           project_id?: string
           provider?: string | null
           requested_language?: string | null
