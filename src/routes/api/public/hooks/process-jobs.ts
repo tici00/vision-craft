@@ -29,7 +29,20 @@ export const Route = createFileRoute("/api/public/hooks/process-jobs")({
         }
 
         const { sweepJobs } = await import("@/services/processing/runner.server");
+        const { runDetached } = await import("@/lib/execution-context.server");
+        // `?wait=1` is only for manual/automated verification: it awaits the
+        // sweep and reports what it did.
+        const wait = new URL(request.url).searchParams.get("wait") === "1";
+
         try {
+          if (!wait) {
+            // Answer the scheduler immediately and keep the sweep running in the
+            // background. pg_net gives up after ~55s; a long media-service call
+            // must not be tied to that connection or it dies mid-transfer.
+            const detached = runDetached(request, () => sweepJobs());
+            return Response.json({ ok: true, detached }, { status: 202 });
+          }
+
           const results = await sweepJobs();
           return Response.json({
             ok: true,
