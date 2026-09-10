@@ -42,6 +42,8 @@ import {
 } from "./transcription.server";
 import {
   planMp3Chunks,
+  DEFAULT_CHUNK_MAX_SECONDS,
+  DEFAULT_CHUNK_TARGET_BYTES,
   type Mp3ChunkPlan,
   type Mp3ChunkPlanEntry,
 } from "./audioChunker.server";
