@@ -22,8 +22,14 @@ import { advanceJob, type JobSnapshot } from "./pipeline.server";
 
 /** A lease older than this means the previous invocation died. */
 export const LEASE_STALE_MS = 90_000;
-/** Wall-clock budget for one invocation; the sweep continues afterwards. */
-const RUN_BUDGET_MS = 40_000;
+/**
+ * Wall-clock budget for one invocation; the sweep continues afterwards.
+ *
+ * The work always runs while the HTTP response of the triggering request is
+ * still pending — that is what keeps the edge invocation alive. The budget must
+ * therefore stay comfortably below the scheduler's own request timeout (55s).
+ */
+export const RUN_BUDGET_MS = 45_000;
 /** Hard cap on stage advances per invocation (defensive, avoids hot loops). */
 const MAX_STEPS_PER_RUN = 40;
 /** Jobs picked up per sweep. */
@@ -81,13 +87,13 @@ async function claimJob(jobId: string): Promise<boolean> {
  * Advances a single job as far as this invocation can. Every stage persists its
  * own result, so stopping at the budget is always safe.
  */
-export async function runJob(jobId: string): Promise<RunResult> {
+export async function runJob(jobId: string, budgetMs = RUN_BUDGET_MS): Promise<RunResult> {
   const claimed = await claimJob(jobId);
   if (!claimed) {
     return { jobId, claimed: false, steps: 0, snapshot: null, reason: "not_claimed" };
   }
 
-  const deadline = Date.now() + RUN_BUDGET_MS;
+  const deadline = Date.now() + budgetMs;
   let steps = 0;
   let snapshot: JobSnapshot | null = null;
 
@@ -120,7 +126,8 @@ async function releaseLease(jobId: string): Promise<void> {
  * stale. Called by the scheduled hook, so progress does not depend on any open
  * browser tab.
  */
-export async function sweepJobs(): Promise<RunResult[]> {
+export async function sweepJobs(budgetMs = RUN_BUDGET_MS): Promise<RunResult[]> {
+  const deadline = Date.now() + budgetMs;
   const staleBefore = new Date(Date.now() - LEASE_STALE_MS).toISOString();
 
   const { data, error } = await supabaseAdmin
