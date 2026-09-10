@@ -406,10 +406,16 @@ async function runExtractingAudio(job: Row): Promise<Row> {
   });
 }
 
-/** Chunks transcribed per `advanceJob` call, so progress is persisted often. */
-const TRANSCRIBE_CHUNKS_PER_CALL = 2;
-/** Retries for transient model/network failures on a single chunk. */
-const CHUNK_RETRIES = 2;
+/**
+ * ONE chunk per call: the unit of work has to finish (and be persisted) inside a
+ * single server execution, otherwise the execution dies mid-chunk and the next
+ * one restarts from the same place with nothing saved.
+ */
+const TRANSCRIBE_CHUNKS_PER_CALL = 1;
+/** Retries for transient model/network failures inside one execution. */
+const CHUNK_RETRIES = 1;
+/** Total attempts a single chunk may consume across executions before failing. */
+const MAX_CHUNK_ATTEMPTS = 4;
 
 function transcriptSegmentsOf(row: Row): TranscriptSegment[] {
   return Array.isArray(row?.segments) ? (row.segments as TranscriptSegment[]) : [];
