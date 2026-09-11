@@ -212,7 +212,16 @@ function ResultsPage() {
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" disabled={!highlights.data.videoUrl}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!highlights.data.videoUrl}
+                      onClick={() => {
+                        if (highlights.data?.videoUrl) {
+                          window.open(highlights.data.videoUrl, "_blank", "noopener,noreferrer");
+                        }
+                      }}
+                    >
                       <Play className="size-4" />
                       Preview
                     </Button>
@@ -387,7 +396,16 @@ function ClipCard({
         )}
 
         <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-          <Button variant="outline" size="sm" disabled={!clip.videoUrl}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!clip.videoUrl}
+            onClick={() => {
+              if (clip.videoUrl) {
+                window.open(clip.videoUrl, "_blank", "noopener,noreferrer");
+              }
+            }}
+          >
             <Play className="size-4" />
             Preview
           </Button>
