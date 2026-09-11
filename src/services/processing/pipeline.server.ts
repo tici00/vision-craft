@@ -914,33 +914,106 @@ async function runPreparingOutputs(job: Row): Promise<Row> {
   });
 }
 
+/** Attempts allowed per clip before it is marked as permanently failed. */
+const MAX_RENDER_ATTEMPTS = 3;
+/** A clip left in `rendering` longer than this had its execution killed. */
+const RENDER_STALE_MS = 10 * 60 * 1000;
+/** Output seconds requested per worker call, so ffmpeg finishes inside one request. */
+const RENDER_OUTPUT_BUDGET_SECONDS = 240;
+
+function clipDuration(clip: Row): number {
+  const start = Number(clip.source_start_seconds ?? 0);
+  const end = Number(clip.source_end_seconds ?? start);
+  return Math.max(0, end - start);
+}
+
+/**
+ * Renders the selected clips one small batch per execution.
+ *
+ * Every clip carries its own status, attempt counter and error, so a clip that
+ * finished stays rendered even when another fails, a killed execution is
+ * recovered on the next sweep, and no AI stage is ever repeated.
+ */
 async function runRendering(job: Row): Promise<Row> {
   if (!isWorkerConfigured()) throw new Error(WORKER_SETUP_MESSAGE);
 
-  const { data: clips } = await supabaseAdmin
-    .from("short_clips")
-    .select("*")
-    .eq("project_id", job.project_id)
-    .order("order_index", { ascending: true });
+  const loadClips = async (): Promise<Row[]> => {
+    const { data } = await supabaseAdmin
+      .from("short_clips")
+      .select("*")
+      .eq("project_id", job.project_id)
+      .order("order_index", { ascending: true });
+    return (data ?? []) as Row[];
+  };
 
-  if (!clips?.length) throw new Error("Nenhum corte encontrado para renderizar.");
+  let clips = await loadClips();
+  if (!clips.length) throw new Error("Nenhum corte encontrado para renderizar.");
 
-  const pending = clips.filter((clip: Row) => clip.render_status === "pending");
-  const alreadyRendered = clips.filter((clip: Row) => clip.render_status === "rendered").length;
+  // Recover clips whose execution died mid-request.
+  const staleCutoff = Date.now() - RENDER_STALE_MS;
+  const stale = clips.filter(
+    (clip) =>
+      clip.render_status === "rendering" &&
+      (!clip.render_started_at || new Date(clip.render_started_at).getTime() < staleCutoff),
+  );
+  if (stale.length) {
+    for (const clip of stale) {
+      const exhausted = Number(clip.render_attempts ?? 0) >= MAX_RENDER_ATTEMPTS;
+      await supabaseAdmin
+        .from("short_clips")
+        .update({
+          render_status: exhausted ? "error" : "pending",
+          render_error:
+            "A execução anterior foi interrompida durante a renderização deste corte.",
+        })
+        .eq("id", clip.id);
+    }
+    clips = await loadClips();
+  }
 
-  if (pending.length === 0) {
-    if (alreadyRendered === 0) {
+  const rendered = clips.filter((clip) => clip.render_status === "rendered");
+  const inFlight = clips.filter((clip) => clip.render_status === "rendering");
+  const retryable = clips.filter(
+    (clip) =>
+      (clip.render_status === "pending" || clip.render_status === "error") &&
+      Number(clip.render_attempts ?? 0) < MAX_RENDER_ATTEMPTS,
+  );
+  const failed = clips.filter(
+    (clip) =>
+      clip.render_status === "error" && Number(clip.render_attempts ?? 0) >= MAX_RENDER_ATTEMPTS,
+  );
+
+  if (retryable.length === 0 && inFlight.length === 0) {
+    if (rendered.length === 0) {
       throw new Error(
         "O serviço de mídia não conseguiu gerar nenhum arquivo de corte. Verifique os logs do serviço de mídia.",
       );
     }
     await supabaseAdmin
       .from("processing_usage")
-      .update({ rendered_clips: alreadyRendered })
+      .update({ rendered_clips: rendered.length })
       .eq("job_id", job.id);
     return moveTo(job, "completed", {
       steps: { rendering: "done" },
-      message: `${alreadyRendered} arquivo(s) de corte gerado(s) pelo serviço de mídia.`,
+      message:
+        `${rendered.length} de ${clips.length} arquivo(s) de corte gerado(s) em ${CLIPS_BUCKET}.` +
+        (failed.length ? ` ${failed.length} corte(s) falharam após ${MAX_RENDER_ATTEMPTS} tentativas.` : ""),
+    });
+  }
+
+  const progressFor = (done: number) =>
+    Math.min(98, 92 + Math.round((done / clips.length) * 6));
+
+  if (retryable.length === 0) {
+    // Another execution holds the remaining clips; report honestly and wait.
+    return updateJob(job.id, {
+      stage: "rendering",
+      status: "running",
+      progress: progressFor(rendered.length),
+      current_step: "Gerando os arquivos dos cortes",
+      stage_message: `${rendered.length} de ${clips.length} corte(s) gerado(s). ${inFlight.length} em renderização.`,
+      worker_stage: "rendering",
+      worker_last_sync_at: new Date().toISOString(),
     });
   }
 
@@ -949,27 +1022,87 @@ async function runRendering(job: Row): Promise<Row> {
   const request = await requestPayload(job);
   const sourceUrl = await createSignedSourceUrl(request.sourceVideo.storagePath!, 12 * 3600);
 
-  // Rendered in batches so multi-hour sources report real, incremental progress.
-  const batch = pending.slice(0, RENDER_BATCH_SIZE);
-  const targets: RenderClipRequest[] = batch.map((clip: Row) => ({
+  // Small, duration-bounded batch: the worker call must finish inside one request.
+  const batch: Row[] = [];
+  let budget = 0;
+  for (const clip of retryable) {
+    const duration = clipDuration(clip);
+    if (batch.length && (batch.length >= RENDER_BATCH_SIZE || budget + duration > RENDER_OUTPUT_BUDGET_SECONDS)) {
+      break;
+    }
+    batch.push(clip);
+    budget += duration;
+  }
+
+  const startedAt = new Date().toISOString();
+  for (const clip of batch) {
+    await supabaseAdmin
+      .from("short_clips")
+      .update({
+        render_status: "rendering",
+        render_error: null,
+        render_attempts: Number(clip.render_attempts ?? 0) + 1,
+        render_started_at: startedAt,
+        render_job_id: job.id,
+      })
+      .eq("id", clip.id);
+  }
+
+  const targets: RenderClipRequest[] = batch.map((clip) => ({
     id: clip.id,
     startSeconds: Number(clip.source_start_seconds),
     endSeconds: Number(clip.source_end_seconds ?? clip.source_start_seconds),
     title: clip.title,
   }));
 
-  const results = await renderClips({
-    sourceUrl,
-    fileName: request.sourceVideo.fileName ?? "source.mp4",
-    clips: targets,
-  });
+  let results;
+  try {
+    results = await renderClips({
+      sourceUrl,
+      fileName: request.sourceVideo.fileName ?? "source.mp4",
+      clips: targets,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Falha na renderização.";
+    for (const clip of batch) {
+      const attempts = Number(clip.render_attempts ?? 0) + 1;
+      await supabaseAdmin
+        .from("short_clips")
+        .update({
+          render_status: attempts >= MAX_RENDER_ATTEMPTS ? "error" : "pending",
+          render_error: message,
+        })
+        .eq("id", clip.id);
+    }
+    const remainingRetryable = retryable.filter(
+      (clip) => Number(clip.render_attempts ?? 0) + 1 < MAX_RENDER_ATTEMPTS,
+    ).length;
+    if (rendered.length === 0 && remainingRetryable === 0) throw error;
+    // Keep the job on the rendering stage: the next sweep retries the clip.
+    return updateJob(job.id, {
+      stage: "rendering",
+      status: "running",
+      progress: progressFor(rendered.length),
+      current_step: "Gerando os arquivos dos cortes",
+      stage_message: `${rendered.length} de ${clips.length} corte(s) gerado(s). Nova tentativa em andamento: ${message}`,
+      worker_stage: "rendering",
+      worker_last_sync_at: new Date().toISOString(),
+      logs: await appendLog(job, `Falha ao renderizar lote: ${message}`),
+    });
+  }
 
-  let rendered = 0;
+  let renderedNow = 0;
   for (const result of results) {
+    const clip = batch.find((entry) => entry.id === result.id);
+    const attempts = Number(clip?.render_attempts ?? 0) + 1;
+
     if (result.error || !result.downloadUrl) {
       await supabaseAdmin
         .from("short_clips")
-        .update({ render_status: "error", render_error: result.error ?? "Falha na renderização." })
+        .update({
+          render_status: attempts >= MAX_RENDER_ATTEMPTS ? "error" : "pending",
+          render_error: result.error ?? "Falha na renderização.",
+        })
         .eq("id", result.id);
       continue;
     }
@@ -982,18 +1115,19 @@ async function runRendering(job: Row): Promise<Row> {
       await supabaseAdmin
         .from("short_clips")
         .update({
-          render_status: "error",
+          render_status: attempts >= MAX_RENDER_ATTEMPTS ? "error" : "pending",
           render_error: error instanceof Error ? error.message : "Falha ao salvar o corte.",
         })
         .eq("id", result.id);
       continue;
     }
 
-    rendered += 1;
+    renderedNow += 1;
     const duration =
       result.startSeconds != null && result.endSeconds != null
         ? Math.max(0, result.endSeconds - result.startSeconds)
         : null;
+    // Persisted immediately, so a later failure never discards this clip.
     await supabaseAdmin
       .from("short_clips")
       .update({
@@ -1004,7 +1138,7 @@ async function runRendering(job: Row): Promise<Row> {
         ...(duration ? { duration_seconds: duration } : {}),
       })
       .eq("id", result.id);
-    const candidateId = clips.find((clip: Row) => clip.id === result.id)?.candidate_id;
+    const candidateId = clip?.candidate_id;
     if (candidateId) {
       await supabaseAdmin
         .from("clip_candidates")
@@ -1013,27 +1147,32 @@ async function runRendering(job: Row): Promise<Row> {
     }
   }
 
-
-  const totalRendered = alreadyRendered + rendered;
-  const remaining = pending.length - batch.length;
+  const totalRendered = rendered.length + renderedNow;
 
   await supabaseAdmin
     .from("processing_usage")
     .update({ rendered_clips: totalRendered })
     .eq("job_id", job.id);
 
-  if (remaining > 0) {
-    // Stays on the rendering stage: the next advance call renders the next batch.
-    const progress = 92 + Math.round((totalRendered / clips.length) * 6);
+  const after = await loadClips();
+  const stillOpen = after.filter(
+    (clip) =>
+      clip.render_status === "rendering" ||
+      ((clip.render_status === "pending" || clip.render_status === "error") &&
+        Number(clip.render_attempts ?? 0) < MAX_RENDER_ATTEMPTS),
+  );
+
+  if (stillOpen.length > 0) {
+    // Stays on the rendering stage: the next advance call renders the next clip.
     return updateJob(job.id, {
       stage: "rendering",
       status: "running",
-      progress: Math.min(98, progress),
+      progress: progressFor(totalRendered),
       current_step: "Gerando os arquivos dos cortes",
       stage_message: `${totalRendered} de ${clips.length} corte(s) gerado(s) pelo serviço de mídia.`,
       worker_stage: "rendering",
       worker_last_sync_at: new Date().toISOString(),
-      logs: await appendLog(job, `Lote renderizado: ${totalRendered}/${clips.length}.`),
+      logs: await appendLog(job, `Renderização: ${totalRendered}/${clips.length}.`),
     });
   }
 
@@ -1043,9 +1182,14 @@ async function runRendering(job: Row): Promise<Row> {
     );
   }
 
+  const permanentlyFailed = after.length - totalRendered;
   return moveTo(job, "completed", {
     steps: { rendering: "done" },
-    message: `${totalRendered} arquivo(s) de corte gerado(s) em ${CLIPS_BUCKET}.`,
+    message:
+      `${totalRendered} de ${after.length} arquivo(s) de corte gerado(s) em ${CLIPS_BUCKET}.` +
+      (permanentlyFailed > 0
+        ? ` ${permanentlyFailed} corte(s) falharam após ${MAX_RENDER_ATTEMPTS} tentativas.`
+        : ""),
   });
 }
 
