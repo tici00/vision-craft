@@ -35,7 +35,11 @@ async function getGeneratedClipsWithPlayback(projectId: string): Promise<ShortCl
       }
 
       // Keep a valid absolute video_url as a fallback for older generated rows.
-      if (!videoUrl && row.video_url && /^https?:\\/\\//i.test(row.video_url)) {
+      if (
+        !videoUrl &&
+        row.video_url &&
+        (row.video_url.startsWith("http://") || row.video_url.startsWith("https://"))
+      ) {
         videoUrl = row.video_url;
       }
 
