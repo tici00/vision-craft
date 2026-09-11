@@ -32,18 +32,8 @@ import {
   type VideoSegment,
 } from "@/types/video-editor";
 
-/**
- * videoProcessingService — the single boundary between the UI and persistence /
- * future processing infrastructure.
- *
- * Today it persists projects, configurations, jobs, segments and results in the
- * database and stores source videos in object storage. Real analysis
- * (transcription, silence detection, visual analysis, rendering) is not
- * implemented: `createProcessingJob` enqueues a real job record that a future
- * worker consumes. Nothing in this module simulates AI results.
- */
-
 const SOURCE_BUCKET = "source-videos";
+const GENERATED_CLIPS_BUCKET = "generated-clips";
 
 export class NotImplementedError extends Error {
   constructor(feature: string) {
@@ -51,8 +41,6 @@ export class NotImplementedError extends Error {
     this.name = "NotImplementedError";
   }
 }
-
-/* ------------------------------------------------------------------ mappers */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = any;
@@ -68,20 +56,17 @@ function mapConfiguration(row: Row): EditConfiguration {
     wantShortClips: row.want_short_clips,
     wantHighlights: row.want_highlights,
     wantLongEdit: row.want_long_edit,
-
     languageMode: (row.language_mode ?? "manual") as LanguageMode,
     primaryLanguage: row.primary_language ?? DEFAULT_LANGUAGE,
     secondaryLanguages: (row.secondary_languages ?? []) as string[],
     hasMultipleLanguages: row.has_multiple_languages ?? false,
     transcriptionLanguage: row.transcription_language ?? row.primary_language ?? DEFAULT_LANGUAGE,
-
     contentTypes: (row.content_types ?? []) as string[],
     videoContext: row.video_context ?? null,
     mainActivity: row.main_activity ?? null,
     analysisNotes: row.analysis_notes ?? null,
     importantAudioVideoFlags: (row.important_audio_video_flags ?? []) as string[],
     analysisMode: (row.analysis_mode ?? "multimodal") as AnalysisMode,
-
     clipsQuantityMode: (row.clips_quantity_mode ?? "auto") as ClipsQuantityMode,
     clipsQuantity: num(row.clips_quantity),
     clipsDurationPreference: (row.clips_duration_preference ?? "auto") as ClipsDurationPreference,
@@ -90,14 +75,12 @@ function mapConfiguration(row: Row): EditConfiguration {
     speechPriority: (row.speech_priority ?? "preferred") as SpeechPriority,
     clipMinSeconds: num(row.clip_min_seconds),
     clipMaxSeconds: num(row.clip_max_seconds),
-
     highlightsDurationMode: (row.highlights_duration_mode ?? "preset") as HighlightsDurationMode,
     highlightsDurationMinutes: Number(row.highlights_duration_minutes ?? 15),
     highlightsTargetSeconds: num(row.highlights_target_seconds),
     highlightsEditingStyle: (row.highlights_editing_style ?? "balanced") as HighlightsStyle,
     highlightsCriteria: (row.highlights_criteria ?? []) as string[],
     highlightsContextLevel: (row.highlights_context_level ?? "balanced") as ContextLevel,
-
     longEditIntensity: (row.long_edit_intensity ?? null) as EditIntensity | null,
     longEditRemoveFlags: (row.long_edit_remove_flags ?? []) as string[],
     removeSilences: row.remove_silences ?? true,
@@ -167,7 +150,7 @@ function mapClip(row: Row): ShortClip {
     category: row.category,
     confidence: row.confidence == null ? null : Number(row.confidence),
     thumbnailUrl: row.thumbnail_url,
-    videoUrl: row.video_url,
+    videoUrl: row.video_url ?? null,
     kept: row.kept,
   };
 }
@@ -185,8 +168,25 @@ function mapGeneratedVideo(row: Row): GeneratedVideo {
     cutsCount: row.cuts_count,
     segmentIds: row.segment_ids ?? [],
     thumbnailUrl: row.thumbnail_url,
-    videoUrl: row.video_url,
+    videoUrl: row.video_url ?? null,
   };
+}
+
+async function createSignedGeneratedClipUrl(storagePath: string | null): Promise<string | null> {
+  if (!storagePath) return null;
+  const { data, error } = await supabase.storage
+    .from(GENERATED_CLIPS_BUCKET)
+    .createSignedUrl(storagePath, 3600);
+  if (error) return null;
+  return data?.signedUrl ?? null;
+}
+
+async function resolveClipPlaybackUrl(row: Row): Promise<string | null> {
+  return row.video_url ?? (await createSignedGeneratedClipUrl(row.video_storage_path ?? null));
+}
+
+async function resolveGeneratedVideoPlaybackUrl(row: Row): Promise<string | null> {
+  return row.video_url ?? (await createSignedGeneratedClipUrl(row.video_storage_path ?? null));
 }
 
 function unwrap<T>(data: T | null, error: { message: string } | null): T {
@@ -195,7 +195,16 @@ function unwrap<T>(data: T | null, error: { message: string } | null): T {
   return data;
 }
 
-/* ---------------------------------------------------------------- interface */
+function triggerBrowserDownload(url: string, filename: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
 
 export interface CreateProjectInput {
   name: string;
@@ -204,7 +213,6 @@ export interface CreateProjectInput {
 export interface UploadVideoInput {
   projectId: string;
   file: File;
-  /** Real metadata read from the file; re-read when omitted. */
   metadata?: VideoFileMetadata;
   onProgress?: (progress: UploadProgress) => void;
   signal?: AbortSignal;
@@ -215,20 +223,17 @@ export interface SaveConfigurationInput {
   wantShortClips: boolean;
   wantHighlights: boolean;
   wantLongEdit: boolean;
-
   languageMode: LanguageMode;
   primaryLanguage: string;
   secondaryLanguages: string[];
   hasMultipleLanguages: boolean;
   transcriptionLanguage: string | null;
-
   contentTypes: string[];
   videoContext: string | null;
   mainActivity: string | null;
   analysisNotes: string | null;
   importantAudioVideoFlags: string[];
   analysisMode: AnalysisMode;
-
   clipsQuantityMode: ClipsQuantityMode;
   clipsQuantity: number | null;
   clipsDurationPreference: ClipsDurationPreference;
@@ -237,14 +242,12 @@ export interface SaveConfigurationInput {
   speechPriority: SpeechPriority;
   clipMinSeconds: number | null;
   clipMaxSeconds: number | null;
-
   highlightsDurationMode: HighlightsDurationMode;
   highlightsDurationMinutes: number | null;
   highlightsTargetSeconds: number | null;
   highlightsEditingStyle: HighlightsStyle;
   highlightsCriteria: string[];
   highlightsContextLevel: ContextLevel;
-
   longEditIntensity: EditIntensity | null;
   longEditRemoveFlags: string[];
   removeSilences: boolean;
@@ -258,8 +261,6 @@ export interface SaveConfigurationInput {
 }
 
 export const videoProcessingService = {
-  /* ------------------------------------------------------------- projects */
-
   async listProjects(): Promise<Project[]> {
     const { data, error } = await supabase
       .from("projects")
@@ -311,25 +312,12 @@ export const videoProcessingService = {
     if (error) throw new Error(error.message);
   },
 
-  /* --------------------------------------------------------------- source */
-
-  /**
-   * Real upload pipeline: metadata is persisted first, then the bytes go to
-   * object storage with real progress, then the reference is confirmed.
-   */
-  async uploadVideo({
-    projectId,
-    file,
-    metadata,
-    onProgress,
-    signal,
-  }: UploadVideoInput): Promise<Project> {
+  async uploadVideo({ projectId, file, metadata, onProgress, signal }: UploadVideoInput): Promise<Project> {
     const resolved = metadata ?? (await videoMetadataService.read(file));
     const existing = await this.getProject(projectId);
     if (existing.sourceStoragePath) {
       await videoUploadService.removeStoredVideo(existing.sourceStoragePath);
     }
-
     await projectService.attachSourceMetadata(projectId, resolved);
     try {
       await projectService.setUploadStatus(projectId, "uploading");
@@ -353,13 +341,10 @@ export const videoProcessingService = {
     return projectService.detachSource(projectId, existing.sourceStoragePath);
   },
 
-  /** Signed playback URL for the private source video, valid for one hour. */
   async getSourcePlaybackUrl(project: Project): Promise<string | null> {
     if (!project.sourceStoragePath) return null;
     return videoUploadService.createSignedUrl(project.sourceStoragePath);
   },
-
-  /* -------------------------------------------------------- configuration */
 
   async getConfiguration(projectId: string): Promise<EditConfiguration | null> {
     const { data, error } = await supabase
@@ -371,10 +356,6 @@ export const videoProcessingService = {
     return data ? mapConfiguration(data) : null;
   },
 
-  /**
-   * Persists the full analysis configuration. Settings for a disabled output are
-   * still stored, so re-enabling an output restores the user's choices.
-   */
   async saveConfiguration(input: SaveConfigurationInput): Promise<EditConfiguration> {
     const { projectId, ...config } = input;
     const { data, error } = await supabase
@@ -385,20 +366,17 @@ export const videoProcessingService = {
           want_short_clips: config.wantShortClips,
           want_highlights: config.wantHighlights,
           want_long_edit: config.wantLongEdit,
-
           language_mode: config.languageMode,
           primary_language: config.primaryLanguage,
           secondary_languages: config.secondaryLanguages,
           has_multiple_languages: config.hasMultipleLanguages,
           transcription_language: config.transcriptionLanguage,
-
           content_types: config.contentTypes,
           video_context: config.videoContext,
           main_activity: config.mainActivity,
           analysis_notes: config.analysisNotes,
           important_audio_video_flags: config.importantAudioVideoFlags,
           analysis_mode: config.analysisMode,
-
           clips_quantity_mode: config.clipsQuantityMode,
           clips_quantity: config.clipsQuantity,
           clips_duration_preference: config.clipsDurationPreference,
@@ -407,14 +385,12 @@ export const videoProcessingService = {
           speech_priority: config.speechPriority,
           clip_min_seconds: config.clipMinSeconds,
           clip_max_seconds: config.clipMaxSeconds,
-
           highlights_duration_mode: config.highlightsDurationMode,
           highlights_duration_minutes: config.highlightsDurationMinutes ?? 15,
           highlights_target_seconds: config.highlightsTargetSeconds,
           highlights_editing_style: config.highlightsEditingStyle,
           highlights_criteria: config.highlightsCriteria,
           highlights_context_level: config.highlightsContextLevel,
-
           long_edit_intensity: config.longEditIntensity,
           long_edit_remove_flags: config.longEditRemoveFlags,
           remove_silences: config.removeSilences,
@@ -452,25 +428,13 @@ export const videoProcessingService = {
     return mapConfiguration(unwrap(data, error));
   },
 
-  /* ----------------------------------------------------------------- jobs */
-
-  /**
-   * Enqueues a real job record carrying the full structured request plus a
-   * snapshot of the configuration used, so the run stays reproducible and
-   * auditable. The real pipeline picks it up and advances it stage by stage —
-   * progress is never simulated.
-   */
   async createProcessingJob(projectId: string): Promise<ProcessingJob> {
     const [project, configuration] = await Promise.all([
       this.getProject(projectId),
       this.getConfiguration(projectId),
     ]);
     if (!configuration) throw new Error("Configure a análise antes de enviar para processamento.");
-    if (
-      !configuration.wantShortClips &&
-      !configuration.wantHighlights &&
-      !configuration.wantLongEdit
-    ) {
+    if (!configuration.wantShortClips && !configuration.wantHighlights && !configuration.wantLongEdit) {
       throw new Error("Selecione ao menos um resultado antes de enviar para processamento.");
     }
     if (!project.sourceStoragePath) {
@@ -514,7 +478,6 @@ export const videoProcessingService = {
     return mapJob(unwrap(data, error));
   },
 
-  /** The exact structured payload a future worker will consume for a project. */
   async buildJobRequest(projectId: string): Promise<AnalysisJobRequest | null> {
     const [project, configuration] = await Promise.all([
       this.getProject(projectId),
@@ -560,8 +523,6 @@ export const videoProcessingService = {
     return job;
   },
 
-  /* ------------------------------------------------------------- analysis */
-
   async getProjectAnalysis(projectId: string): Promise<ProjectAnalysis> {
     const [project, configuration, segments, latestJob] = await Promise.all([
       this.getProject(projectId),
@@ -592,8 +553,6 @@ export const videoProcessingService = {
     return mapSegment(unwrap(data, error));
   },
 
-  /* -------------------------------------------------------------- results */
-
   async getGeneratedClips(projectId: string): Promise<ShortClip[]> {
     const { data, error } = await supabase
       .from("short_clips")
@@ -601,7 +560,13 @@ export const videoProcessingService = {
       .eq("project_id", projectId)
       .order("source_start_seconds", { ascending: true });
     if (error) throw new Error(error.message);
-    return (data ?? []).map(mapClip);
+
+    return Promise.all(
+      (data ?? []).map(async (row) => ({
+        ...mapClip(row),
+        videoUrl: await resolveClipPlaybackUrl(row),
+      })),
+    );
   },
 
   async setClipKept(clipId: string, kept: boolean): Promise<void> {
@@ -622,10 +587,7 @@ export const videoProcessingService = {
     return this.getGeneratedVideo(projectId, "long_edit");
   },
 
-  async getGeneratedVideo(
-    projectId: string,
-    kind: GeneratedVideoKind,
-  ): Promise<GeneratedVideo | null> {
+  async getGeneratedVideo(projectId: string, kind: GeneratedVideoKind): Promise<GeneratedVideo | null> {
     const { data, error } = await supabase
       .from("generated_videos")
       .select("*")
@@ -633,17 +595,43 @@ export const videoProcessingService = {
       .eq("kind", kind)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    return data ? mapGeneratedVideo(data) : null;
+    if (!data) return null;
+    return {
+      ...mapGeneratedVideo(data),
+      videoUrl: await resolveGeneratedVideoPlaybackUrl(data),
+    };
   },
 
-  /** Export/render pipeline lives in the future processing backend. */
-  async exportResult(_params: {
+  async exportResult(params: {
     projectId: string;
     resultId: string;
     kind: "clip" | GeneratedVideoKind;
     format?: "mp4" | "mov";
-  }): Promise<never> {
-    throw new NotImplementedError("Exporting results");
+  }): Promise<string> {
+    const table = params.kind === "clip" ? "short_clips" : "generated_videos";
+    const { data, error } = await supabase
+      .from(table)
+      .select("video_url, video_storage_path, title, kind")
+      .eq("id", params.resultId)
+      .eq("project_id", params.projectId)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error("Resultado não encontrado.");
+
+    const url = await resolveClipPlaybackUrl(data);
+    if (!url) {
+      throw new Error("O arquivo renderizado ainda não está disponível para download.");
+    }
+
+    const rawName =
+      params.kind === "clip"
+        ? String(data.title ?? `clip-${params.resultId}`)
+        : `${String(data.kind ?? params.kind)}-${params.resultId}`;
+    const safeName = rawName.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "vision-craft-output";
+    const extension = params.format ?? "mp4";
+    triggerBrowserDownload(url, `${safeName}.${extension}`);
+    return url;
   },
 };
 
