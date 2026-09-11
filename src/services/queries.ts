@@ -2,9 +2,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { videoProcessingService } from "@/services/videoProcessingService";
 import type { Project, EditConfiguration, ShortClip } from "@/types/video-editor";
 
-function generatedClipPlaybackUrl(clipId: string): string {
-  return `/api/public/generated-clips/${encodeURIComponent(clipId)}`;
-}
+const GENERATED_CLIPS_BUCKET = "generated-clips";
+const GENERATED_CLIP_URL_TTL_SECONDS = 60 * 60;
 
 async function getGeneratedClipsWithPlayback(projectId: string): Promise<ShortClip[]> {
   const { data, error } = await supabase
@@ -15,20 +14,47 @@ async function getGeneratedClipsWithPlayback(projectId: string): Promise<ShortCl
 
   if (error) throw new Error(error.message);
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    projectId: row.project_id,
-    title: row.title,
-    durationSeconds: Number(row.duration_seconds),
-    sourceStartSeconds: Number(row.source_start_seconds),
-    category: row.category,
-    confidence: row.confidence == null ? null : Number(row.confidence),
-    thumbnailUrl: row.thumbnail_url,
-    // Keep the bucket private. The server-side media proxy resolves the
-    // storage path and returns a short-lived signed URL when requested.
-    videoUrl: generatedClipPlaybackUrl(row.id),
-    kept: row.kept,
-  })) satisfies ShortClip[];
+  const clips = await Promise.all(
+    (data ?? []).map(async (row) => {
+      let videoUrl: string | null = null;
+
+      if (row.video_storage_path) {
+        const signed = await supabase.storage
+          .from(GENERATED_CLIPS_BUCKET)
+          .createSignedUrl(row.video_storage_path, GENERATED_CLIP_URL_TTL_SECONDS);
+
+        if (!signed.error && signed.data?.signedUrl) {
+          videoUrl = signed.data.signedUrl;
+        } else {
+          console.error(
+            "[generated-clips] failed to create signed URL",
+            row.id,
+            signed.error?.message,
+          );
+        }
+      }
+
+      // Keep a valid absolute video_url as a fallback for older generated rows.
+      if (!videoUrl && row.video_url && /^https?:\\/\\//i.test(row.video_url)) {
+        videoUrl = row.video_url;
+      }
+
+      return {
+        id: row.id,
+        projectId: row.project_id,
+        title: row.title,
+        durationSeconds: Number(row.duration_seconds),
+        sourceStartSeconds: Number(row.source_start_seconds),
+        category: row.category,
+        confidence: row.confidence == null ? null : Number(row.confidence),
+        thumbnailUrl: row.thumbnail_url,
+        videoUrl,
+        kept: row.kept,
+      } satisfies ShortClip;
+    }),
+  );
+
+  return clips;
 }
 
 export const projectQueries = {
