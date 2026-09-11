@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const GENERATED_CLIPS_BUCKET = "generated-clips";
 const SIGNED_URL_TTL_SECONDS = 10 * 60;
@@ -17,6 +16,13 @@ export const Route = createFileRoute("/api/public/generated-clips/$clipId")({
     handlers: {
       GET: async ({ request, params }) => {
         try {
+          // Keep the server-only Supabase client out of the route module's
+          // client bundle. The generated server route can then load it only
+          // when the GET handler actually executes on the server.
+          const { supabaseAdmin } = await import(
+            "@/integrations/supabase/client.server"
+          );
+
           const { data: clip, error } = await supabaseAdmin
             .from("short_clips")
             .select("id, video_url, video_storage_path, title")
@@ -54,7 +60,10 @@ export const Route = createFileRoute("/api/public/generated-clips/$clipId")({
             }
 
             sourceUrl = signed.data.signedUrl;
-          } else if (clip.video_url && !clip.video_url.startsWith("/api/public/generated-clips/")) {
+          } else if (
+            clip.video_url &&
+            !clip.video_url.startsWith("/api/public/generated-clips/")
+          ) {
             sourceUrl = clip.video_url;
           }
 
@@ -115,7 +124,10 @@ export const Route = createFileRoute("/api/public/generated-clips/$clipId")({
             headers: responseHeaders,
           });
         } catch (error) {
-          const message = error instanceof Error ? error.message : "Falha inesperada ao carregar o corte.";
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Falha inesperada ao carregar o corte.";
           console.error("[generated-clips]", message);
           return Response.json(
             { error: "O serviço de mídia não conseguiu carregar este corte." },
