@@ -976,7 +976,10 @@ export type Database = {
           published: boolean
           published_at: string | null
           reason: string | null
+          render_attempts: number
           render_error: string | null
+          render_job_id: string | null
+          render_started_at: string | null
           render_status: string
           source_end_seconds: number | null
           source_start_seconds: number
@@ -1012,7 +1015,10 @@ export type Database = {
           published?: boolean
           published_at?: string | null
           reason?: string | null
+          render_attempts?: number
           render_error?: string | null
+          render_job_id?: string | null
+          render_started_at?: string | null
           render_status?: string
           source_end_seconds?: number | null
           source_start_seconds: number
@@ -1048,7 +1054,10 @@ export type Database = {
           published?: boolean
           published_at?: string | null
           reason?: string | null
+          render_attempts?: number
           render_error?: string | null
+          render_job_id?: string | null
+          render_started_at?: string | null
           render_status?: string
           source_end_seconds?: number | null
           source_start_seconds?: number
