@@ -489,100 +489,141 @@ function mapRenderPayload(
   });
 }
 
-/**
- * Worker capability cache: whether `/render-clips` can read the source from a
- * signed URL instead of a full multipart upload. Probed once per runtime; the
- * deployed worker currently answers 400 ("Envie o arquivo no campo multipart
- * 'video'."), so the upload path stays in use until the service adds support.
- */
-let sourceUrlRenderSupported: boolean | null = null;
-
-export function getSourceUrlRenderSupport(): boolean | null {
-  return sourceUrlRenderSupported;
-}
-
-async function tryRenderClipsByUrl(
-  params: RenderClipsParams,
-): Promise<RenderClipResult[] | null> {
-  if (sourceUrlRenderSupported === false) return null;
-  try {
-    const payload = await workerRequest<{
-      ok?: boolean;
-      error?: string;
-      clips?: { id?: string; start?: number; end?: number; url?: string; error?: string }[];
-    }>("/render-clips", {
-      method: "POST",
-      contentType: "application/json",
-      retries: 0,
-      body: JSON.stringify({
-        videoUrl: params.sourceUrl,
-        clips: params.clips.map((clip) => ({
-          id: clip.id,
-          start: Number(clip.startSeconds.toFixed(3)),
-          end: Number(clip.endSeconds.toFixed(3)),
-        })),
-      }),
-      diagnostics: { stage: "render-clips-url", clipCount: params.clips.length },
-    });
-    if (payload.ok === false || !payload.clips?.length) {
-      sourceUrlRenderSupported = false;
-      return null;
-    }
-    sourceUrlRenderSupported = true;
-    return mapRenderPayload(params, payload);
-  } catch {
-    // Any refusal means the capability is absent: fall back to the upload path.
-    sourceUrlRenderSupported = false;
-    return null;
-  }
-}
+/* ---------------------------------------------------------- async render jobs */
 
 /**
- * Renders a batch of clips. Prefers handing the worker a signed source URL (no
- * upload); falls back to streaming the file when the service does not support it.
- * The worker returns one file per requested range; Vision Craft then copies each
- * file into storage.
+ * Creates an asynchronous render job in the media worker.
+ *
+ * The source video stays in storage: only its signed URL and the requested
+ * clip ranges are sent to the worker. The worker downloads the source once,
+ * renders the clips sequentially and exposes the job status/results.
  */
-export async function renderClips(params: RenderClipsParams): Promise<RenderClipResult[]> {
-  if (params.clips.length === 0) return [];
-
-  const byUrl = await tryRenderClipsByUrl(params);
-  if (byUrl) return byUrl;
-
-  const source = await openSourceStream(params.sourceUrl);
-  const { body, contentType, bytesSent } = multipartStream(
-    {
-      clips: JSON.stringify(
-        params.clips.map((clip) => ({
-          id: clip.id,
-          start: Number(clip.startSeconds.toFixed(3)),
-          end: Number(clip.endSeconds.toFixed(3)),
-        })),
-      ),
-    },
-    {
-      field: "video",
-      fileName: params.fileName ?? "source.mp4",
-      contentType: params.contentType ?? source.contentType,
-      stream: source.stream,
-    },
-  );
-
+async function createRenderJob(params: RenderClipsParams): Promise<{ jobId: string }> {
   const payload = await workerRequest<{
     ok?: boolean;
+    jobId?: string;
+    status?: string;
     error?: string;
-    clips?: { id?: string; start?: number; end?: number; url?: string; error?: string }[];
-  }>("/render-clips", {
-    body,
-    contentType,
-    bytesSent,
-    diagnostics: { stage: "render-clips", clipCount: params.clips.length },
+  }>("/render-jobs", {
+    method: "POST",
+    contentType: "application/json",
+    body: JSON.stringify({
+      videoUrl: params.sourceUrl,
+      clips: params.clips.map((clip) => ({
+        id: clip.id,
+        start: Number(clip.startSeconds.toFixed(3)),
+        end: Number(clip.endSeconds.toFixed(3)),
+      })),
+    }),
+    diagnostics: {
+      stage: "render-job-create",
+      clipCount: params.clips.length,
+    },
   });
 
-
-  if (payload.ok === false) {
-    throw new WorkerError(502, "/render-clips", payload.error ?? "Falha ao renderizar os cortes.");
+  if (!payload.jobId) {
+    throw new WorkerError(
+      502,
+      "/render-jobs",
+      payload.error ?? "O serviço de mídia não retornou um jobId.",
+    );
   }
 
-  return mapRenderPayload(params, payload);
+  return { jobId: payload.jobId };
+}
+
+interface RenderJobStatus {
+  ok?: boolean;
+  job?: {
+    id?: string;
+    status?: "queued" | "downloading" | "rendering" | "completed" | "failed";
+    progress?: number;
+    error?: string | null;
+    clips?: {
+      id?: string;
+      start?: number;
+      end?: number;
+      url?: string;
+      error?: string | null;
+    }[];
+  };
+}
+
+async function getRenderJob(jobId: string): Promise<RenderJobStatus> {
+  return workerRequest<RenderJobStatus>(`/render-jobs/${encodeURIComponent(jobId)}`, {
+    method: "GET",
+    timeoutMs: 90 * 1000,
+    retries: 2,
+    diagnostics: {
+      stage: "render-job-status",
+      jobId,
+    },
+  });
+}
+
+const RENDER_JOB_POLL_INTERVAL_MS = 3000;
+const RENDER_JOB_MAX_WAIT_MS = 45 * 60 * 1000;
+
+async function waitForRenderJob(jobId: string): Promise<RenderJobStatus> {
+  const startedAt = Date.now();
+
+  for (;;) {
+    if (Date.now() - startedAt > RENDER_JOB_MAX_WAIT_MS) {
+      throw new WorkerError(
+        504,
+        `/render-jobs/${jobId}`,
+        "O processamento dos cortes excedeu o tempo máximo de espera.",
+      );
+    }
+
+    const result = await getRenderJob(jobId);
+    const job = result.job;
+
+    if (!job) {
+      throw new WorkerError(
+        502,
+        `/render-jobs/${jobId}`,
+        "O serviço de mídia não retornou os dados do job.",
+      );
+    }
+
+    if (job.status === "completed") {
+      return result;
+    }
+
+    if (job.status === "failed") {
+      throw new WorkerError(
+        502,
+        `/render-jobs/${jobId}`,
+        job.error ?? "O serviço de mídia falhou ao renderizar os cortes.",
+      );
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, RENDER_JOB_POLL_INTERVAL_MS),
+    );
+  }
+}
+
+/**
+ * Renders clips through the asynchronous worker job API.
+ *
+ * No video bytes are uploaded by Vision Craft during this step. The worker
+ * receives the source URL, downloads the video once and renders the requested
+ * clips independently.
+ */
+export async function renderClips(
+  params: RenderClipsParams,
+): Promise<RenderClipResult[]> {
+  if (params.clips.length === 0) return [];
+
+  const { jobId } = await createRenderJob(params);
+  const result = await waitForRenderJob(jobId);
+
+  const clips = result.job?.clips ?? [];
+
+  return mapRenderPayload(params, {
+    ok: true,
+    clips,
+  });
 }
