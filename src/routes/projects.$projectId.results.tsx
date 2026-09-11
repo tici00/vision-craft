@@ -161,7 +161,6 @@ function ResultsPage() {
                       toast.success("Clip deleted");
                       invalidate();
                     }}
-                    onExport={() => exportResult.mutate({ resultId: clip.id, kind: "clip" })}
                   />
                 ))}
               </div>
@@ -337,13 +336,27 @@ function ClipCard({
   clip,
   onKeepToggle,
   onDelete,
-  onExport,
 }: {
   clip: ShortClip;
   onKeepToggle: () => void;
   onDelete: () => void;
-  onExport: () => void;
 }) {
+  const playbackUrl = clip.videoUrl;
+  const downloadUrl = playbackUrl
+    ? `${playbackUrl}${playbackUrl.includes("?") ? "&" : "?"}download=1`
+    : null;
+
+  const downloadClip = () => {
+    if (!downloadUrl) return;
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = "";
+    link.rel = "noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
   return (
     <article className="panel hover-lift overflow-hidden">
       <div className="relative aspect-video border-b border-border bg-surface-raised">
@@ -399,10 +412,10 @@ function ClipCard({
           <Button
             variant="outline"
             size="sm"
-            disabled={!clip.videoUrl}
+            disabled={!playbackUrl}
             onClick={() => {
-              if (clip.videoUrl) {
-                window.open(clip.videoUrl, "_blank", "noopener,noreferrer");
+              if (playbackUrl) {
+                window.open(playbackUrl, "_blank", "noopener,noreferrer");
               }
             }}
           >
@@ -412,7 +425,14 @@ function ClipCard({
           <Button variant={clip.kept ? "secondary" : "default"} size="sm" onClick={onKeepToggle}>
             {clip.kept ? "Discard" : "Keep"}
           </Button>
-          <Button variant="ghost" size="sm" onClick={onExport}>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!downloadUrl}
+            onClick={downloadClip}
+            title="Download clip"
+            aria-label={`Download ${clip.title}`}
+          >
             <Download className="size-4" />
           </Button>
           <Button
