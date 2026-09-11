@@ -222,17 +222,11 @@ async function releaseActiveBatch(
   clipIds: string[],
   message: string,
 ): Promise<void> {
-  const { error } = await supabaseAdmin
+  const { data: clips, error } = await supabaseAdmin
     .from("short_clips")
     .select("id, render_attempts")
     .in("id", clipIds);
   if (error) throw new Error(error.message);
-
-  const { data: clips, error: loadError } = await supabaseAdmin
-    .from("short_clips")
-    .select("id, render_attempts")
-    .in("id", clipIds);
-  if (loadError) throw new Error(loadError.message);
 
   for (const clip of clips ?? []) {
     const currentAttempts = Number(clip.render_attempts ?? 0);
