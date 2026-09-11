@@ -584,15 +584,5 @@ export async function renderClips(params: RenderClipsParams): Promise<RenderClip
     throw new WorkerError(502, "/render-clips", payload.error ?? "Falha ao renderizar os cortes.");
   }
 
-  const returned = payload.clips ?? [];
-  return params.clips.map((clip, index) => {
-    const result = returned[index];
-    return {
-      id: clip.id,
-      downloadUrl: result?.url ? normalizeWorkerUrl(result.url) : null,
-      startSeconds: result?.start ?? clip.startSeconds,
-      endSeconds: result?.end ?? clip.endSeconds,
-      error: result?.error ?? (result?.url ? null : "O serviço de mídia não retornou o arquivo."),
-    };
-  });
+  return mapRenderPayload(params, payload);
 }
