@@ -23,8 +23,7 @@ export const Route = createFileRoute("/api/public/generated-clips/$clipId")({
           return Response.json({ error: "Corte não encontrado." }, { status: 404 });
         }
 
-        const url = new URL(request.url);
-        const download = url.searchParams.get("download") === "1";
+        const download = new URL(request.url).searchParams.get("download") === "1";
 
         if (clip.video_storage_path) {
           const filename =
@@ -32,21 +31,25 @@ export const Route = createFileRoute("/api/public/generated-clips/$clipId")({
               .replace(/[^a-zA-Z0-9._-]+/g, "-")
               .replace(/^-+|-+$/g, "") || "vision-craft-clip"}.mp4`;
 
-          const { data, error: signedUrlError } = await supabaseAdmin.storage
-            .from(GENERATED_CLIPS_BUCKET)
-            .createSignedUrl(clip.video_storage_path, SIGNED_URL_TTL_SECONDS, {
-              download: download ? filename : false,
-            });
+          const signed = download
+            ? await supabaseAdmin.storage
+                .from(GENERATED_CLIPS_BUCKET)
+                .createSignedUrl(clip.video_storage_path, SIGNED_URL_TTL_SECONDS, {
+                  download: filename,
+                })
+            : await supabaseAdmin.storage
+                .from(GENERATED_CLIPS_BUCKET)
+                .createSignedUrl(clip.video_storage_path, SIGNED_URL_TTL_SECONDS);
 
-          if (signedUrlError || !data?.signedUrl) {
-            console.error("[generated-clips] signed URL failed", signedUrlError?.message);
+          if (signed.error || !signed.data?.signedUrl) {
+            console.error("[generated-clips] signed URL failed", signed.error?.message);
             return Response.json(
               { error: "O arquivo renderizado ainda não está disponível." },
               { status: 404 },
             );
           }
 
-          return Response.redirect(data.signedUrl, 302);
+          return Response.redirect(signed.data.signedUrl, 302);
         }
 
         if (clip.video_url) {
