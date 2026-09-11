@@ -5,11 +5,11 @@
  * through `workerClient.server.ts`; no component should ever call the worker
  * directly.
  *
- * The real worker contract (verified against the deployed service) is:
+ * The real worker contract is:
  *   GET  /health        -> { ok, service, ffmpeg, timestamp }
  *   POST /extract-audio -> multipart field `video` -> { ok, audioId, audioUrl }
- *   POST /render-clips  -> multipart field `video` + `clips` JSON
- *                          -> { ok, clips: [{ id, start, end, url }] }
+ *   POST /render-jobs   -> JSON { videoUrl, clips } -> { ok, jobId, status }
+ *   GET  /render-jobs/:id -> { ok, job: { status, clips, error } }
  * Authentication uses the `x-worker-token` header.
  */
 
