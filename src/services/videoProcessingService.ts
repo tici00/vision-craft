@@ -609,9 +609,13 @@ export const videoProcessingService = {
     format?: "mp4" | "mov";
   }): Promise<string> {
     const table = params.kind === "clip" ? "short_clips" : "generated_videos";
+    const selectColumns =
+      params.kind === "clip"
+        ? "video_url, video_storage_path, title"
+        : "video_url, video_storage_path, kind";
     const { data, error } = await supabase
       .from(table)
-      .select("video_url, video_storage_path, title, kind")
+      .select(selectColumns)
       .eq("id", params.resultId)
       .eq("project_id", params.projectId)
       .maybeSingle();
