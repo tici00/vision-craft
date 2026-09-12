@@ -1,13 +1,12 @@
 /**
- * Real timestamped transcription through Vision Craft's external AI provider.
+ * Real timestamped transcription through Vision Craft's provider router.
  *
- * Audio is processed in small chunks and timestamps are offset back onto the
- * source timeline, so every returned second still refers to the original
- * recording. No Lovable AI Gateway is involved.
+ * The active provider is selected by AI_PROVIDER and can be OpenAI, Gemini,
+ * or a self-hosted OpenAI-compatible local server. No Lovable AI Gateway.
  */
 
 import { fetchMp3Chunk, type Mp3ChunkPlanEntry } from "./audioChunker.server";
-import { transcribeAudio } from "./gateway.server";
+import { transcribeAudio } from "./aiRouter.server";
 import { fetchInlineMedia, type AudioChunk } from "./media.server";
 
 export interface TranscriptSegment {
@@ -56,7 +55,6 @@ async function transcribeInline(params: {
   return { language: raw.language, segments };
 }
 
-/** Transcribes the original file inline (short sources only). */
 export async function transcribeDirectSource(params: {
   sourceUrl: string;
   format: string;
@@ -74,12 +72,10 @@ export async function transcribeDirectSource(params: {
     language,
     segments,
     text: segments.map((segment) => segment.text).join(" "),
-    transcribedSeconds:
-      params.durationSeconds ?? (segments.length ? segments[segments.length - 1]!.endSeconds : 0),
+    transcribedSeconds: params.durationSeconds ?? (segments.length ? segments[segments.length - 1]!.endSeconds : 0),
   };
 }
 
-/** Transcribes audio chunks produced by the external media worker. */
 export async function transcribeAudioChunks(params: {
   chunks: AudioChunk[];
   languageHint: string | null;
@@ -98,13 +94,9 @@ export async function transcribeAudioChunks(params: {
     });
     language = language ?? result.language;
     all.push(...result.segments);
-    transcribedSeconds =
-      chunk.durationSeconds != null
-        ? transcribedSeconds + chunk.durationSeconds
-        : Math.max(
-            transcribedSeconds,
-            result.segments.length ? result.segments[result.segments.length - 1]!.endSeconds : 0,
-          );
+    transcribedSeconds = chunk.durationSeconds != null
+      ? transcribedSeconds + chunk.durationSeconds
+      : Math.max(transcribedSeconds, result.segments.length ? result.segments[result.segments.length - 1]!.endSeconds : 0);
   }
 
   all.sort((a, b) => a.startSeconds - b.startSeconds);
@@ -116,13 +108,6 @@ export async function transcribeAudioChunks(params: {
   };
 }
 
-/**
- * Transcribes ONE planned MP3 chunk of the remote audio produced by the worker.
- *
- * Only the bytes of that chunk are fetched (HTTP Range) and sent to the external
- * transcription provider, so the full multi-hour MP3 never reaches memory nor
- * the model. Returned timestamps are already offset onto the original timeline.
- */
 export async function transcribeMp3Chunk(params: {
   audioUrl: string;
   chunk: Mp3ChunkPlanEntry;
