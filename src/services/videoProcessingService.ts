@@ -182,11 +182,11 @@ async function createSignedGeneratedClipUrl(storagePath: string | null): Promise
 }
 
 async function resolveClipPlaybackUrl(row: Row): Promise<string | null> {
-  return row.video_url ?? (await createSignedGeneratedClipUrl(row.video_storage_path ?? null));
+  return (await createSignedGeneratedClipUrl(row.video_storage_path ?? null)) ?? row.video_url ?? null;
 }
 
 async function resolveGeneratedVideoPlaybackUrl(row: Row): Promise<string | null> {
-  return row.video_url ?? (await createSignedGeneratedClipUrl(row.video_storage_path ?? null));
+  return (await createSignedGeneratedClipUrl(row.video_storage_path ?? null)) ?? row.video_url ?? null;
 }
 
 function unwrap<T>(data: T | null, error: { message: string } | null): T {
@@ -199,11 +199,25 @@ function triggerBrowserDownload(url: string, filename: string): void {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
-  anchor.target = "_blank";
-  anchor.rel = "noopener noreferrer";
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+}
+
+function safeOutputFilename(value: string, extension = "mp4"): string {
+  const base = value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return `${base || "vision-craft-output"}.${extension}`;
+}
+
+async function createSignedGeneratedClipDownloadUrl(
+  storagePath: string,
+  filename: string,
+): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(GENERATED_CLIPS_BUCKET)
+    .createSignedUrl(storagePath, 300, { download: filename });
+  if (error) throw new Error(error.message);
+  return data?.signedUrl ?? null;
 }
 
 export interface CreateProjectInput {
@@ -602,39 +616,77 @@ export const videoProcessingService = {
     };
   },
 
+  async refreshResultPlaybackUrl(params: {
+    projectId: string;
+    resultId: string;
+    kind: "clip" | GeneratedVideoKind;
+  }): Promise<string | null> {
+    if (params.kind === "clip") {
+      const { data, error } = await supabase
+        .from("short_clips")
+        .select("video_url, video_storage_path")
+        .eq("id", params.resultId)
+        .eq("project_id", params.projectId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return data ? resolveClipPlaybackUrl(data) : null;
+    }
+
+    const { data, error } = await supabase
+      .from("generated_videos")
+      .select("video_url, video_storage_path")
+      .eq("id", params.resultId)
+      .eq("project_id", params.projectId)
+      .eq("kind", params.kind)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? resolveGeneratedVideoPlaybackUrl(data) : null;
+  },
+
   async exportResult(params: {
     projectId: string;
     resultId: string;
     kind: "clip" | GeneratedVideoKind;
     format?: "mp4" | "mov";
   }): Promise<string> {
-    const table = params.kind === "clip" ? "short_clips" : "generated_videos";
-    const selectColumns =
-      params.kind === "clip"
-        ? "video_url, video_storage_path, title"
-        : "video_url, video_storage_path, kind";
-    const { data, error } = await supabase
-      .from(table)
-      .select(selectColumns)
-      .eq("id", params.resultId)
-      .eq("project_id", params.projectId)
-      .maybeSingle();
+    let storagePath: string | null = null;
+    let fallbackUrl: string | null = null;
+    let rawName: string;
 
-    if (error) throw new Error(error.message);
-    if (!data) throw new Error("Resultado não encontrado.");
-
-    const url = await resolveClipPlaybackUrl(data);
-    if (!url) {
-      throw new Error("O arquivo renderizado ainda não está disponível para download.");
+    if (params.kind === "clip") {
+      const { data, error } = await supabase
+        .from("short_clips")
+        .select("video_url, video_storage_path, title")
+        .eq("id", params.resultId)
+        .eq("project_id", params.projectId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error("Resultado não encontrado.");
+      storagePath = data.video_storage_path;
+      fallbackUrl = data.video_url;
+      rawName = data.title ?? `clip-${params.resultId}`;
+    } else {
+      const { data, error } = await supabase
+        .from("generated_videos")
+        .select("video_url, video_storage_path, kind")
+        .eq("id", params.resultId)
+        .eq("project_id", params.projectId)
+        .eq("kind", params.kind)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error("Resultado não encontrado.");
+      storagePath = data.video_storage_path;
+      fallbackUrl = data.video_url;
+      rawName = `${data.kind}-${params.resultId}`;
     }
 
-    const rawName =
-      params.kind === "clip"
-        ? String(data.title ?? `clip-${params.resultId}`)
-        : `${String(data.kind ?? params.kind)}-${params.resultId}`;
-    const safeName = rawName.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "vision-craft-output";
-    const extension = params.format ?? "mp4";
-    triggerBrowserDownload(url, `${safeName}.${extension}`);
+    const filename = safeOutputFilename(rawName, params.format ?? "mp4");
+    const url = storagePath
+      ? await createSignedGeneratedClipDownloadUrl(storagePath, filename)
+      : fallbackUrl;
+    if (!url) throw new Error("O arquivo renderizado não está disponível para download.");
+
+    triggerBrowserDownload(url, filename);
     return url;
   },
 };
