@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -22,6 +23,10 @@ import { projectQueries } from "@/services/queries";
 import { intelligenceQueries } from "@/services/intelligence/intelligenceService";
 import { ClipIntelligenceCard } from "@/components/intelligence/ClipIntelligenceCard";
 import { CreatorIntelligencePanel } from "@/components/intelligence/CreatorIntelligencePanel";
+import {
+  ResultVideoDialog,
+  type VideoPreviewResult,
+} from "@/components/results/ResultVideoDialog";
 import { videoProcessingService, NotImplementedError } from "@/services/videoProcessingService";
 import { seedDemoResults } from "@/services/demo/demoResults";
 import { formatDurationLabel, formatPercent, formatTimecode } from "@/lib/format";
@@ -48,6 +53,9 @@ export const Route = createFileRoute("/projects/$projectId/results")({
 function ResultsPage() {
   const { projectId } = Route.useParams();
   const queryClient = useQueryClient();
+  const [preview, setPreview] = useState<
+    (VideoPreviewResult & { kind: "clip" | "highlights" | "long_edit" }) | null
+  >(null);
 
   const analysis = useQuery(projectQueries.analysis(projectId));
   const clips = useQuery(projectQueries.clips(projectId));
@@ -80,6 +88,19 @@ function ResultsPage() {
           : error.message,
       ),
   });
+
+  const refreshPreviewUrl = useCallback(
+    (result: VideoPreviewResult) => {
+      const kind = preview?.id === result.id ? preview.kind : null;
+      if (!kind) return Promise.resolve(null);
+      return videoProcessingService.refreshResultPlaybackUrl({
+        projectId,
+        resultId: result.id,
+        kind,
+      });
+    },
+    [preview, projectId],
+  );
 
   const loading = analysis.isLoading || clips.isLoading;
 
@@ -152,6 +173,22 @@ function ResultsPage() {
                   <ClipCard
                     key={clip.id}
                     clip={clip}
+                    onPreview={() =>
+                      setPreview({
+                        id: clip.id,
+                        title: clip.title,
+                        durationSeconds: clip.durationSeconds,
+                        sourceStartSeconds: clip.sourceStartSeconds,
+                        videoUrl: clip.videoUrl,
+                        kind: "clip",
+                      })
+                    }
+                    onDownload={() =>
+                      exportResult.mutate({ resultId: clip.id, kind: "clip" })
+                    }
+                    downloadPending={
+                      exportResult.isPending && exportResult.variables?.resultId === clip.id
+                    }
                     onKeepToggle={async () => {
                       await videoProcessingService.setClipKept(clip.id, !clip.kept);
                       invalidate();
@@ -215,11 +252,15 @@ function ResultsPage() {
                       variant="outline"
                       size="sm"
                       disabled={!highlights.data.videoUrl}
-                      onClick={() => {
-                        if (highlights.data?.videoUrl) {
-                          window.open(highlights.data.videoUrl, "_blank", "noopener,noreferrer");
-                        }
-                      }}
+                      onClick={() =>
+                        setPreview({
+                          id: highlights.data.id,
+                          title: "Highlights video",
+                          durationSeconds: highlights.data.finalDurationSeconds,
+                          videoUrl: highlights.data.videoUrl,
+                          kind: "highlights",
+                        })
+                      }
                     >
                       <Play className="size-4" />
                       Preview
@@ -268,6 +309,15 @@ function ResultsPage() {
               <LongEditPanel
                 video={longEdit.data}
                 segments={analysis.data?.segments ?? []}
+                onPreview={() =>
+                  setPreview({
+                    id: longEdit.data.id,
+                    title: "Edited long video",
+                    durationSeconds: longEdit.data.finalDurationSeconds,
+                    videoUrl: longEdit.data.videoUrl,
+                    kind: "long_edit",
+                  })
+                }
                 onExport={() =>
                   exportResult.mutate({ resultId: longEdit.data!.id, kind: "long_edit" })
                 }
@@ -276,6 +326,14 @@ function ResultsPage() {
           </TabsContent>
         </Tabs>
       </main>
+
+      <ResultVideoDialog
+        result={preview}
+        onOpenChange={(open) => {
+          if (!open) setPreview(null);
+        }}
+        refreshUrl={refreshPreviewUrl}
+      />
     </>
   );
 }
@@ -283,10 +341,12 @@ function ResultsPage() {
 function LongEditPanel({
   video,
   segments,
+  onPreview,
   onExport,
 }: {
   video: GeneratedVideo;
   segments: VideoSegment[];
+  onPreview: () => void;
   onExport: () => void;
 }) {
   const original = video.originalDurationSeconds ?? 0;
@@ -300,10 +360,16 @@ function LongEditPanel({
             Low-value sections removed, context preserved.
           </p>
         </div>
-        <Button size="sm" variant="secondary" onClick={onExport}>
-          <Download className="size-4" />
-          Export
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" disabled={!video.videoUrl} onClick={onPreview}>
+            <Play className="size-4" />
+            Preview
+          </Button>
+          <Button size="sm" variant="secondary" disabled={!video.videoUrl} onClick={onExport}>
+            <Download className="size-4" />
+            Export
+          </Button>
+        </div>
       </div>
 
       <div className="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-5">
@@ -334,29 +400,19 @@ function LongEditPanel({
 
 function ClipCard({
   clip,
+  onPreview,
+  onDownload,
+  downloadPending,
   onKeepToggle,
   onDelete,
 }: {
   clip: ShortClip;
+  onPreview: () => void;
+  onDownload: () => void;
+  downloadPending: boolean;
   onKeepToggle: () => void;
   onDelete: () => void;
 }) {
-  const playbackUrl = clip.videoUrl;
-  const downloadUrl = playbackUrl
-    ? `${playbackUrl}${playbackUrl.includes("?") ? "&" : "?"}download=1`
-    : null;
-
-  const downloadClip = () => {
-    if (!downloadUrl) return;
-    const link = document.createElement("a");
-    link.href = downloadUrl;
-    link.download = "";
-    link.rel = "noreferrer";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  };
-
   return (
     <article className="panel hover-lift overflow-hidden">
       <div className="relative aspect-video border-b border-border bg-surface-raised">
@@ -412,12 +468,8 @@ function ClipCard({
           <Button
             variant="outline"
             size="sm"
-            disabled={!playbackUrl}
-            onClick={() => {
-              if (playbackUrl) {
-                window.open(playbackUrl, "_blank", "noopener,noreferrer");
-              }
-            }}
+            disabled={!clip.videoUrl}
+            onClick={onPreview}
           >
             <Play className="size-4" />
             Preview
@@ -428,12 +480,16 @@ function ClipCard({
           <Button
             variant="ghost"
             size="sm"
-            disabled={!downloadUrl}
-            onClick={downloadClip}
+            disabled={!clip.videoUrl || downloadPending}
+            onClick={onDownload}
             title="Download clip"
             aria-label={`Download ${clip.title}`}
           >
-            <Download className="size-4" />
+            {downloadPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Download className="size-4" />
+            )}
           </Button>
           <Button
             variant="ghost"
