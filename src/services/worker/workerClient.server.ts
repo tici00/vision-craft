@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import type { Json } from "@/integrations/supabase/types";
 
 export {
   WorkerError,
@@ -132,6 +133,10 @@ async function loadRenderJobMapping(
   mapping: StoredRenderJob | null;
 }> {
   const firstClipId = clipIds[0];
+  if (!firstClipId) {
+    throw new Error("Não foi possível localizar o primeiro corte do lote.");
+  }
+
   const { data: clip, error: clipError } = await supabaseAdmin
     .from("short_clips")
     .select("job_id")
@@ -179,13 +184,15 @@ async function persistRenderJobMapping(
     },
   };
 
+  const nextPayload = {
+    ...payload,
+    renderJobs,
+  };
+
   const { error } = await supabaseAdmin
     .from("processing_jobs")
     .update({
-      worker_payload: {
-        ...payload,
-        renderJobs,
-      } as unknown as Record<string, unknown>,
+      worker_payload: nextPayload as unknown as Json,
       worker_stage: "rendering",
       worker_last_sync_at: new Date().toISOString(),
     })
@@ -200,13 +207,15 @@ async function removeRenderJobMapping(
 ): Promise<void> {
   const renderJobs = { ...(payload.renderJobs ?? {}) };
   delete renderJobs[clipIds.join("|")];
+  const nextPayload = {
+    ...payload,
+    renderJobs,
+  };
+
   await supabaseAdmin
     .from("processing_jobs")
     .update({
-      worker_payload: {
-        ...payload,
-        renderJobs,
-      } as unknown as Record<string, unknown>,
+      worker_payload: nextPayload as unknown as Json,
       worker_last_sync_at: new Date().toISOString(),
     })
     .eq("id", processingJobId);
