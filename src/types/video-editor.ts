@@ -229,6 +229,7 @@ export interface ShortClip {
   category: string | null;
   confidence: number | null;
   thumbnailUrl: string | null;
+  videoStoragePath: string | null;
   videoUrl: string | null;
   kept: boolean;
 }
@@ -243,6 +244,7 @@ export interface GeneratedVideo {
   cutsCount: number | null;
   segmentIds: string[];
   thumbnailUrl: string | null;
+  videoStoragePath: string | null;
   videoUrl: string | null;
 }
 

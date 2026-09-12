@@ -52,6 +52,7 @@ async function getGeneratedClipsWithPlayback(projectId: string): Promise<ShortCl
         category: row.category,
         confidence: row.confidence == null ? null : Number(row.confidence),
         thumbnailUrl: row.thumbnail_url,
+        videoStoragePath: row.video_storage_path,
         videoUrl,
         kept: row.kept,
       } satisfies ShortClip;
