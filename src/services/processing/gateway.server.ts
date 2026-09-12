@@ -7,6 +7,7 @@
  */
 
 const OPENAI_API_URL = "https://api.openai.com/v1";
+const MAX_RATE_LIMIT_RETRIES = 2;
 
 /** Default text model used for timestamp-aware moment selection and scoring. */
 export const ANALYSIS_MODEL = process.env["OPENAI_ANALYSIS_MODEL"] ?? "gpt-5-mini";
@@ -47,12 +48,21 @@ function parseProviderError(body: string): ProviderErrorPayload {
   }
 }
 
-function friendlyProviderMessage(status: number, body: string): string {
+function providerErrorDetails(body: string): {
+  message: string;
+  code: string | null;
+  type: string | null;
+} {
   const payload = parseProviderError(body);
-  const providerError = payload.error;
-  const message = providerError?.message ?? payload.message ?? body.slice(0, 500);
-  const code = providerError?.code ?? null;
-  const type = providerError?.type ?? null;
+  return {
+    message: payload.error?.message ?? payload.message ?? body.slice(0, 500),
+    code: payload.error?.code ?? null,
+    type: payload.error?.type ?? null,
+  };
+}
+
+function friendlyProviderMessage(status: number, body: string): string {
+  const { message, code, type } = providerErrorDetails(body);
 
   if (status === 429) {
     const lower = `${message} ${code ?? ""} ${type ?? ""}`.toLowerCase();
@@ -86,6 +96,22 @@ function friendlyProviderMessage(status: number, body: string): string {
   }
 }
 
+function isRetryableRateLimit(body: string): boolean {
+  const { message, code, type } = providerErrorDetails(body);
+  const lower = `${message} ${code ?? ""} ${type ?? ""}`.toLowerCase();
+  return !(
+    lower.includes("insufficient_quota") ||
+    lower.includes("quota") ||
+    lower.includes("billing") ||
+    lower.includes("credits") ||
+    lower.includes("exceeded your current quota")
+  );
+}
+
+function retryDelayMs(attempt: number): number {
+  return 1000 * 2 ** attempt;
+}
+
 export type ContentPart =
   | { type: "text"; text: string }
   | { type: "input_audio"; input_audio: { data: string; format: string } };
@@ -115,6 +141,28 @@ function headers(): HeadersInit {
   };
 }
 
+async function fetchWithRateLimitRetry(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+    const response = await fetch(url, init);
+    if (response.status !== 429 || attempt === MAX_RATE_LIMIT_RETRIES) return response;
+
+    const body = await response.text().catch(() => "");
+    if (!isRetryableRateLimit(body)) {
+      return new Response(body, {
+        status: response.status,
+        headers: response.headers,
+      });
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt)));
+  }
+
+  throw new AiGatewayError(429, "A IA externa atingiu o limite de requisições.");
+}
+
 /** Raw text completion from the external OpenAI API. */
 export async function chatText({
   model = ANALYSIS_MODEL,
@@ -133,7 +181,7 @@ export async function chatText({
     );
   }
 
-  const response = await fetch(`${OPENAI_API_URL}/chat/completions`, {
+  const response = await fetchWithRateLimitRetry(`${OPENAI_API_URL}/chat/completions`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({
@@ -148,7 +196,13 @@ export async function chatText({
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new AiGatewayError(response.status, friendlyProviderMessage(response.status, body), parseProviderError(body).error?.code ?? null, parseProviderError(body).error?.type ?? null);
+    const details = providerErrorDetails(body);
+    throw new AiGatewayError(
+      response.status,
+      friendlyProviderMessage(response.status, body),
+      details.code,
+      details.type,
+    );
   }
 
   const payload = (await response.json()) as {
@@ -187,7 +241,7 @@ export async function transcribeAudio(params: {
   if (params.languageHint) form.append("language", params.languageHint);
   if (params.prompt) form.append("prompt", params.prompt);
 
-  const response = await fetch(`${OPENAI_API_URL}/audio/transcriptions`, {
+  const response = await fetchWithRateLimitRetry(`${OPENAI_API_URL}/audio/transcriptions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${requireApiKey()}` },
     body: form,
@@ -195,12 +249,12 @@ export async function transcribeAudio(params: {
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    const parsed = parseProviderError(body);
+    const details = providerErrorDetails(body);
     throw new AiGatewayError(
       response.status,
       friendlyProviderMessage(response.status, body),
-      parsed.error?.code ?? null,
-      parsed.error?.type ?? null,
+      details.code,
+      details.type,
     );
   }
 
