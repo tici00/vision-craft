@@ -1,4 +1,5 @@
 import { chatJson } from "./aiRouter.server";
+import { constructClipInterval } from "./intervalConstruction.server";
 import type { AnalysisJobRequest } from "@/services/analysis/contracts";
 import type { TranscriptSegment } from "./transcription.server";
 import {
@@ -113,11 +114,37 @@ export async function selectShortClipCandidates(params: {
     minimumClipCount: minimum, maximumClipCount: explicitQuantity ?? parsed.length,
     avoidSimilar: output.avoidSimilar, ...(params.weights ? { weights: params.weights } : {}),
   });
-  const candidates: ClipCandidate[] = ranked.map((entry) => ({
-    ...entry.candidate, diversityGroup: entry.diversityGroup, composition: entry.composition,
-    clipScore: entry.composition.clipScore, diversityPenalty: entry.diversityPenalty,
-    selected: entry.selected, selectionRank: entry.rank, selectionReason: entry.selectionReason,
-    topSignals: entry.composition.topSignals,
-  }));
+  const candidates: ClipCandidate[] = ranked.map((entry) => {
+    const candidate = entry.candidate;
+    if (!entry.selected) {
+      return {
+        ...candidate, diversityGroup: entry.diversityGroup, composition: entry.composition,
+        clipScore: entry.composition.clipScore, diversityPenalty: entry.diversityPenalty,
+        selected: false, selectionRank: entry.rank, selectionReason: entry.selectionReason,
+        topSignals: entry.composition.topSignals,
+      };
+    }
+
+    const interval = constructClipInterval(candidate, transcript, {
+      minSeconds,
+      maxSeconds,
+      timelineEnd,
+    });
+
+    return {
+      ...candidate,
+      startSeconds: interval.startSeconds,
+      endSeconds: interval.endSeconds,
+      durationSeconds: interval.durationSeconds,
+      diversityGroup: entry.diversityGroup,
+      composition: entry.composition,
+      clipScore: entry.composition.clipScore,
+      diversityPenalty: entry.diversityPenalty,
+      selected: true,
+      selectionRank: entry.rank,
+      selectionReason: entry.selectionReason,
+      topSignals: entry.composition.topSignals,
+    };
+  });
   return { candidates, minimumClipCount: minimum, evaluatedCount: parsed.length };
 }
