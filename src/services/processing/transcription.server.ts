@@ -1,14 +1,13 @@
 /**
- * Real timestamped transcription.
+ * Real timestamped transcription through Vision Craft's external AI provider.
  *
- * The audio (or the original short video, which carries its audio track) is
- * sent to a multimodal model that returns speech segments with real start/end
- * timestamps. Timestamps from chunked audio are offset back onto the source
- * timeline, so every returned second refers to the original recording.
+ * Audio is processed in small chunks and timestamps are offset back onto the
+ * source timeline, so every returned second still refers to the original
+ * recording. No Lovable AI Gateway is involved.
  */
 
 import { fetchMp3Chunk, type Mp3ChunkPlanEntry } from "./audioChunker.server";
-import { chatJson, type ContentPart } from "./gateway.server";
+import { transcribeAudio } from "./gateway.server";
 import { fetchInlineMedia, type AudioChunk } from "./media.server";
 
 export interface TranscriptSegment {
@@ -24,25 +23,11 @@ export interface TranscriptionResult {
   transcribedSeconds: number;
 }
 
-interface RawTranscription {
-  language?: string | null;
-  segments?: { start?: number; end?: number; text?: string }[];
-}
-
-const SYSTEM_PROMPT =
-  "Você transcreve mídia com precisão de tempo. Responda SOMENTE com JSON válido. " +
-  "Nunca invente fala: se não houver fala audível, retorne segments vazio. " +
-  "Os tempos devem ser em segundos, relativos ao início da mídia enviada.";
-
-function buildUserPrompt(languageHint: string | null, offsetSeconds: number): string {
+function buildTranscriptionPrompt(languageHint: string | null): string {
   return [
-    "Transcreva a fala presente nesta mídia.",
-    languageHint
-      ? `O idioma informado pelo usuário é "${languageHint}" — use-o como referência principal.`
-      : "Detecte o idioma automaticamente.",
-    `Esta mídia começa em ${offsetSeconds.toFixed(2)}s do vídeo original, mas use tempos relativos a esta mídia (começando em 0).`,
-    'Formato: {"language":"<código ISO>","segments":[{"start":<segundos>,"end":<segundos>,"text":"<fala>"}]}',
-    "Quebre em segmentos curtos (uma frase ou até ~15 segundos).",
+    "Transcreva fielmente a fala audível.",
+    languageHint ? `O idioma esperado é ${languageHint}.` : "Detecte o idioma automaticamente.",
+    "Preserve nomes próprios, termos técnicos e palavras incomuns quando forem audíveis.",
   ].join(" ");
 }
 
@@ -52,22 +37,23 @@ async function transcribeInline(params: {
   offsetSeconds: number;
   languageHint: string | null;
 }): Promise<{ language: string | null; segments: TranscriptSegment[] }> {
-  const parts: ContentPart[] = [
-    { type: "text", text: buildUserPrompt(params.languageHint, params.offsetSeconds) },
-    { type: "input_audio", input_audio: { data: params.data, format: params.format } },
-  ];
+  const raw = await transcribeAudio({
+    data: params.data,
+    format: params.format,
+    languageHint: params.languageHint,
+    prompt: buildTranscriptionPrompt(params.languageHint),
+  });
 
-  const raw = await chatJson<RawTranscription>({ system: SYSTEM_PROMPT, parts });
-  const segments = (raw.segments ?? [])
+  const segments = raw.segments
     .map((segment) => ({
-      startSeconds: Math.max(0, Number(segment.start ?? 0)) + params.offsetSeconds,
-      endSeconds: Math.max(0, Number(segment.end ?? 0)) + params.offsetSeconds,
-      text: (segment.text ?? "").trim(),
+      startSeconds: Math.max(0, Number(segment.start)) + params.offsetSeconds,
+      endSeconds: Math.max(0, Number(segment.end)) + params.offsetSeconds,
+      text: segment.text.trim(),
     }))
     .filter((segment) => segment.text.length > 0 && segment.endSeconds > segment.startSeconds)
     .sort((a, b) => a.startSeconds - b.startSeconds);
 
-  return { language: raw.language?.trim() || null, segments };
+  return { language: raw.language, segments };
 }
 
 /** Transcribes the original file inline (short sources only). */
@@ -133,9 +119,9 @@ export async function transcribeAudioChunks(params: {
 /**
  * Transcribes ONE planned MP3 chunk of the remote audio produced by the worker.
  *
- * Only the bytes of that chunk are fetched (HTTP Range) and sent to the model,
- * so the full multi-hour MP3 never reaches memory nor the model. Returned
- * timestamps are already offset onto the original video timeline.
+ * Only the bytes of that chunk are fetched (HTTP Range) and sent to the external
+ * transcription provider, so the full multi-hour MP3 never reaches memory nor
+ * the model. Returned timestamps are already offset onto the original timeline.
  */
 export async function transcribeMp3Chunk(params: {
   audioUrl: string;
