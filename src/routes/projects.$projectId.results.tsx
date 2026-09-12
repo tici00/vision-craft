@@ -251,13 +251,13 @@ function ResultsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={!highlights.data.videoUrl}
+                          disabled={!highlights.data.videoUrl && !highlights.data.videoStoragePath}
                       onClick={() =>
                         setPreview({
-                          id: highlights.data.id,
+                          id: highlights.data?.id ?? "",
                           title: "Highlights video",
-                          durationSeconds: highlights.data.finalDurationSeconds,
-                          videoUrl: highlights.data.videoUrl,
+                          durationSeconds: highlights.data?.finalDurationSeconds ?? null,
+                          videoUrl: highlights.data?.videoUrl ?? null,
                           kind: "highlights",
                         })
                       }
@@ -311,10 +311,10 @@ function ResultsPage() {
                 segments={analysis.data?.segments ?? []}
                 onPreview={() =>
                   setPreview({
-                    id: longEdit.data.id,
+                    id: longEdit.data?.id ?? "",
                     title: "Edited long video",
-                    durationSeconds: longEdit.data.finalDurationSeconds,
-                    videoUrl: longEdit.data.videoUrl,
+                    durationSeconds: longEdit.data?.finalDurationSeconds ?? null,
+                    videoUrl: longEdit.data?.videoUrl ?? null,
                     kind: "long_edit",
                   })
                 }
@@ -361,11 +361,11 @@ function LongEditPanel({
           </p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" disabled={!video.videoUrl} onClick={onPreview}>
+          <Button size="sm" disabled={!video.videoUrl && !video.videoStoragePath} onClick={onPreview}>
             <Play className="size-4" />
             Preview
           </Button>
-          <Button size="sm" variant="secondary" disabled={!video.videoUrl} onClick={onExport}>
+          <Button size="sm" variant="secondary" disabled={!video.videoUrl && !video.videoStoragePath} onClick={onExport}>
             <Download className="size-4" />
             Export
           </Button>
@@ -468,7 +468,7 @@ function ClipCard({
           <Button
             variant="outline"
             size="sm"
-            disabled={!clip.videoUrl}
+            disabled={!clip.videoUrl && !clip.videoStoragePath}
             onClick={onPreview}
           >
             <Play className="size-4" />
@@ -480,7 +480,7 @@ function ClipCard({
           <Button
             variant="ghost"
             size="sm"
-            disabled={!clip.videoUrl || downloadPending}
+            disabled={(!clip.videoUrl && !clip.videoStoragePath) || downloadPending}
             onClick={onDownload}
             title="Download clip"
             aria-label={`Download ${clip.title}`}

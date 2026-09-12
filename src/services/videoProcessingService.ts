@@ -150,6 +150,7 @@ function mapClip(row: Row): ShortClip {
     category: row.category,
     confidence: row.confidence == null ? null : Number(row.confidence),
     thumbnailUrl: row.thumbnail_url,
+    videoStoragePath: row.video_storage_path ?? null,
     videoUrl: row.video_url ?? null,
     kept: row.kept,
   };
@@ -168,6 +169,7 @@ function mapGeneratedVideo(row: Row): GeneratedVideo {
     cutsCount: row.cuts_count,
     segmentIds: row.segment_ids ?? [],
     thumbnailUrl: row.thumbnail_url,
+    videoStoragePath: row.video_storage_path ?? null,
     videoUrl: row.video_url ?? null,
   };
 }
