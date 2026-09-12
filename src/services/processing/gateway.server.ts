@@ -17,28 +17,72 @@ export const TRANSCRIPTION_MODEL =
 
 export class AiGatewayError extends Error {
   status: number;
+  code: string | null;
+  providerType: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null, providerType: string | null = null) {
     super(message);
     this.status = status;
+    this.code = code;
+    this.providerType = providerType;
     this.name = "AiGatewayError";
   }
 }
 
+type ProviderErrorPayload = {
+  error?: {
+    message?: string;
+    type?: string;
+    code?: string | null;
+    param?: string | null;
+  };
+  message?: string;
+};
+
+function parseProviderError(body: string): ProviderErrorPayload {
+  try {
+    return JSON.parse(body) as ProviderErrorPayload;
+  } catch {
+    return {};
+  }
+}
+
 function friendlyProviderMessage(status: number, body: string): string {
+  const payload = parseProviderError(body);
+  const providerError = payload.error;
+  const message = providerError?.message ?? payload.message ?? body.slice(0, 500);
+  const code = providerError?.code ?? null;
+  const type = providerError?.type ?? null;
+
+  if (status === 429) {
+    const lower = `${message} ${code ?? ""} ${type ?? ""}`.toLowerCase();
+    const isQuota =
+      lower.includes("insufficient_quota") ||
+      lower.includes("quota") ||
+      lower.includes("billing") ||
+      lower.includes("credits") ||
+      lower.includes("exceeded your current quota");
+
+    if (isQuota) {
+      return `A IA externa recusou a requisição por quota/faturamento. Verifique o saldo, o faturamento e os limites de uso da conta OpenAI. [${code ?? type ?? "quota"}]`;
+    }
+
+    return `A IA externa recusou a requisição por limite de taxa (rate limit). Aguarde alguns segundos e tente novamente. [${code ?? type ?? "rate_limit"}]`;
+  }
+
   switch (status) {
+    case 400:
+      return `A IA externa rejeitou a requisição: ${message}`;
     case 401:
       return "A chave da IA externa é inválida ou não foi aceita pelo provedor.";
     case 402:
       return "O saldo/faturamento da IA externa não está disponível para este processamento.";
     case 403:
-      return "O acesso ao modelo de IA externa foi recusado pelo provedor.";
+      return `O acesso ao modelo de IA externa foi recusado pelo provedor: ${message}`;
     case 404:
-      return "O modelo ou recurso de IA externa solicitado não está disponível.";
-    case 429:
-      return "O limite de requisições da IA externa foi atingido. Tente novamente em alguns minutos.";
+      return `O modelo ou recurso de IA externa solicitado não está disponível: ${message}`;
     default:
-      return `Falha na chamada da IA externa (${status}): ${body.slice(0, 500)}`;
+      return `Falha na chamada da IA externa (${status}): ${message}`;
   }
 }
 
@@ -104,7 +148,7 @@ export async function chatText({
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new AiGatewayError(response.status, friendlyProviderMessage(response.status, body));
+    throw new AiGatewayError(response.status, friendlyProviderMessage(response.status, body), parseProviderError(body).error?.code ?? null, parseProviderError(body).error?.type ?? null);
   }
 
   const payload = (await response.json()) as {
@@ -151,7 +195,13 @@ export async function transcribeAudio(params: {
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new AiGatewayError(response.status, friendlyProviderMessage(response.status, body));
+    const parsed = parseProviderError(body);
+    throw new AiGatewayError(
+      response.status,
+      friendlyProviderMessage(response.status, body),
+      parsed.error?.code ?? null,
+      parsed.error?.type ?? null,
+    );
   }
 
   const payload = (await response.json()) as {
